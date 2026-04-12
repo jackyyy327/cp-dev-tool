@@ -4,8 +4,8 @@ import { useState, useEffect } from 'react'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import type { SitemapEntry, Platform, SiteType } from '@/types/sitemap'
-import { Search, Globe, Calendar, Tag, BookOpen, Filter } from 'lucide-react'
+import type { SitemapEntry, Platform, SiteType, RecognitionStatus } from '@/types/sitemap'
+import { Search, Globe, Calendar, Tag, BookOpen, Filter, FileSearch, CheckCircle2, AlertTriangle, HelpCircle } from 'lucide-react'
 
 const PLATFORM_LABELS: Record<string, string> = {
   shopify: 'Shopify',
@@ -184,6 +184,19 @@ function SitemapCard({ entry, onDeleted, onUseAsTemplate }: {
         </div>
       )}
 
+      {/* Structured analysis summary */}
+      {entry.generationResult && (
+        <div className="mb-3 space-y-1.5">
+          <div className="flex items-start gap-1.5">
+            <FileSearch className="w-3 h-3 text-blue-400 mt-0.5 shrink-0" />
+            <p className="text-gray-400 text-xs line-clamp-2">{entry.generationResult.summary.overallAssessment}</p>
+          </div>
+          {entry.generationResult.pageTypes.length > 0 && (
+            <PageTypeStatusSummary pageTypes={entry.generationResult.pageTypes} />
+          )}
+        </div>
+      )}
+
       {entry.notes && (
         <p className="text-gray-500 text-xs mb-3 line-clamp-2">{entry.notes}</p>
       )}
@@ -213,5 +226,38 @@ function SitemapCard({ entry, onDeleted, onUseAsTemplate }: {
         </div>
       </div>
     </Card>
+  )
+}
+
+const STATUS_ICON: Record<RecognitionStatus, React.ReactNode> = {
+  confirmed: <CheckCircle2 className="w-3 h-3 text-green-400" />,
+  likely: <AlertTriangle className="w-3 h-3 text-yellow-400" />,
+  template: <HelpCircle className="w-3 h-3 text-gray-500" />,
+}
+
+function PageTypeStatusSummary({ pageTypes }: { pageTypes: { recognitionStatus: RecognitionStatus }[] }) {
+  const counts = { confirmed: 0, likely: 0, template: 0 }
+  for (const pt of pageTypes) {
+    counts[pt.recognitionStatus]++
+  }
+
+  return (
+    <div className="flex items-center gap-3 text-xs">
+      {counts.confirmed > 0 && (
+        <span className="flex items-center gap-1 text-green-400">
+          {STATUS_ICON.confirmed} {counts.confirmed} Confirmed
+        </span>
+      )}
+      {counts.likely > 0 && (
+        <span className="flex items-center gap-1 text-yellow-400">
+          {STATUS_ICON.likely} {counts.likely} Likely
+        </span>
+      )}
+      {counts.template > 0 && (
+        <span className="flex items-center gap-1 text-gray-500">
+          {STATUS_ICON.template} {counts.template} Template
+        </span>
+      )}
+    </div>
   )
 }

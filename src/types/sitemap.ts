@@ -113,4 +113,5 @@ export interface SitemapEntry {
   updatedAt: string
   createdBy?: string
   crawlResult?: CrawlResult  // stored for template re-use
+  generationResult?: GenerationResult  // structured analysis from generation
 }

@@ -101,17 +101,21 @@ export function SitemapWizard({ templateEntry, onTemplateConsumed, onSaved }: Si
   useEffect(() => {
     if (!templateEntry) return
     setUrl(templateEntry.url)
-    // Template entries only have code — wrap in a minimal GenerationResult
-    setGenerationResult({
-      code: templateEntry.code,
-      summary: {
-        overallAssessment: 'テンプレートから読み込まれたコードです。',
-        globalRisks: [],
-        nextActions: ['テンプレートをベースに新しいサイト向けに再生成してください'],
-        heuristicLimitations: [],
-      },
-      pageTypes: [],
-    })
+    // Restore full generationResult if available, otherwise build a minimal fallback
+    if (templateEntry.generationResult) {
+      setGenerationResult(templateEntry.generationResult)
+    } else {
+      setGenerationResult({
+        code: templateEntry.code,
+        summary: {
+          overallAssessment: 'テンプレートから読み込まれたコードです。この記録には構造化分析データが含まれていません。',
+          globalRisks: [],
+          nextActions: ['テンプレートをベースに新しいサイト向けに再生成してください'],
+          heuristicLimitations: [],
+        },
+        pageTypes: [],
+      })
+    }
     if (templateEntry.crawlResult) {
       setCrawlResult(templateEntry.crawlResult)
     }
@@ -447,6 +451,7 @@ export function SitemapWizard({ templateEntry, onTemplateConsumed, onSaved }: Si
               <SaveToKBDialog
                 crawlResult={crawlResult}
                 code={generatedCode}
+                generationResult={generationResult}
                 onSaved={handleSaved}
                 onCancel={() => setShowSaveDialog(false)}
               />
@@ -476,7 +481,7 @@ export function SitemapWizard({ templateEntry, onTemplateConsumed, onSaved }: Si
 
       {/* Right pane: Results Workbench */}
       <div className="rounded-xl overflow-hidden border border-gray-800 bg-gray-900 flex flex-col">
-        {step === 'done' && generationResult && generationResult.pageTypes.length > 0 ? (
+        {step === 'done' && generationResult ? (
           /* Tabbed results when generation is complete with analysis */
           <Tabs defaultValue="code" value={resultTab} onValueChange={v => setResultTab(v as string)}>
             <div className="flex items-center justify-between px-4 py-2 border-b border-gray-800 bg-gray-900/80">
@@ -703,8 +708,13 @@ export function SitemapWizard({ templateEntry, onTemplateConsumed, onSaved }: Si
                 })}
 
                 {generationResult.pageTypes.length === 0 && (
-                  <div className="text-center text-gray-500 text-sm py-8">
-                    ページタイプの分析データがありません
+                  <div className="flex flex-col items-center justify-center py-12 px-6 text-center">
+                    <AlertCircle className="w-8 h-8 text-amber-500 mb-3" />
+                    <h4 className="text-white font-medium text-sm mb-1">ページタイプ別の分析データがありません</h4>
+                    <p className="text-gray-500 text-xs leading-relaxed max-w-xs">
+                      この生成ではページタイプ別の詳細分析が取得できませんでした。
+                      Reviewタブの総合評価・リスク・次のアクションを確認し、コードの手動レビューを重点的に行ってください。
+                    </p>
                   </div>
                 )}
               </div>

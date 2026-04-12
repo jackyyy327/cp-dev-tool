@@ -45,6 +45,7 @@ export async function POST(req: NextRequest) {
     notes: body.notes,
     tags: body.tags || [],
     crawlResult: body.crawlResult,
+    generationResult: body.generationResult,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   }

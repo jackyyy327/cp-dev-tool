@@ -250,10 +250,10 @@ function WelcomeScreen({ onSuggest }: { onSuggest: (q: string) => void }) {
   const suggestions = [
     'isMatch 関数の書き方を教えて',
     'コンテンツゾーンとは何ですか？',
-    '信頼度スコアが40%の意味は？',
+    'Confirmed / Likely / Template の違いは？',
     'カタログオブジェクトの設定方法',
     'SPA サイトの設定方法は？',
-    'JSON-LD からデータを取得するには？',
+    'ヒューリスティック識別の限界とは？',
   ]
 
   return (

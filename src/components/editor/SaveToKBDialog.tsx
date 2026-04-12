@@ -5,12 +5,13 @@ import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
-import type { CrawlResult, Industry } from '@/types/sitemap'
+import type { CrawlResult, GenerationResult, Industry } from '@/types/sitemap'
 import { CheckCircle2, Loader2, X } from 'lucide-react'
 
 interface SaveToKBDialogProps {
   crawlResult: CrawlResult
   code: string
+  generationResult?: GenerationResult | null
   onSaved: () => void
   onCancel: () => void
 }
@@ -27,7 +28,7 @@ const INDUSTRY_OPTIONS: { value: Industry; label: string }[] = [
   { value: 'other', label: 'その他' },
 ]
 
-export function SaveToKBDialog({ crawlResult, code, onSaved, onCancel }: SaveToKBDialogProps) {
+export function SaveToKBDialog({ crawlResult, code, generationResult, onSaved, onCancel }: SaveToKBDialogProps) {
   const defaultName = (() => {
     try { return new URL(crawlResult.url).hostname.replace(/^www\./, '') } catch { return '' }
   })()
@@ -75,6 +76,7 @@ export function SaveToKBDialog({ crawlResult, code, onSaved, onCancel }: SaveToK
           notes: notes.trim() || undefined,
           tags,
           crawlResult,
+          generationResult: generationResult ?? undefined,
         }),
       })
       if (!res.ok) throw new Error('保存に失敗しました')
