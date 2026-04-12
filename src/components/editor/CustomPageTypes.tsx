@@ -28,6 +28,7 @@ export function CustomPageTypes({ entries, onChange, siteUrl }: CustomPageTypesP
   const [importText, setImportText] = useState('')
   const [importing, setImporting] = useState(false)
   const [importError, setImportError] = useState('')
+  const [importHint, setImportHint] = useState('')
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
 
   function addEmpty() {
@@ -78,11 +79,20 @@ export function CustomPageTypes({ entries, onChange, siteUrl }: CustomPageTypesP
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
 
-      onChange([...entries, ...data.entries])
-      const newIds = data.entries.map((e: CustomPageTypeEntry) => e.id)
+      const imported: CustomPageTypeEntry[] = data.entries
+      onChange([...entries, ...imported])
+      const newIds = imported.map((e: CustomPageTypeEntry) => e.id)
       setExpandedIds(prev => new Set([...prev, ...newIds]))
       setImportText('')
       setImportOpen(false)
+
+      // Build validation hint
+      const noRule = imported.filter(e => !e.rule.trim()).length
+      const noUrls = imported.filter(e => !e.sampleUrls.trim()).length
+      const hints: string[] = [`${imported.length} 件のページタイプを AI 初稿として抽出しました。`]
+      if (noRule > 0) hints.push(`${noRule} 件で判定ルールが空です。`)
+      if (noUrls > 0) hints.push(`${noUrls} 件でサンプル URL が未設定です — 追加すると isMatch の精度が向上します。`)
+      setImportHint(hints.join(' '))
     } catch (e) {
       setImportError(e instanceof Error ? e.message : 'Import failed')
     } finally {
@@ -134,7 +144,10 @@ export function CustomPageTypes({ entries, onChange, siteUrl }: CustomPageTypesP
             </button>
           </div>
           <p className="text-gray-400 text-xs">
-            要件書をそのまま貼り付けてください。どんなフォーマットでも、Claudeが自動的にページタイプ名・Action・URL判定ルールを抽出します。
+            要件書をそのまま貼り付けてください。Claude が AI 初稿としてページタイプ名・Action・URL 判定ルールを抽出します。
+          </p>
+          <p className="text-amber-400/70 text-xs">
+            ※ 抽出結果は AI による推定です。ページタイプ名・Action・判定ルール・サンプル URL を必ず確認・修正してからご使用ください。
           </p>
           <Textarea
             placeholder={`Example:\n\nBG_Category_Hair_and_Beauty_Top\nURL: /c/2HA + 3文字\nAction: BG_Category_Hair_and_Beauty_Top_View\n\nBG_Product_Detail\nURL: /p/ 以降すべて\nAction: BG_Product_Detail_View`}
@@ -167,6 +180,17 @@ export function CustomPageTypes({ entries, onChange, siteUrl }: CustomPageTypesP
             </Button>
           </div>
         </Card>
+      )}
+
+      {/* Import hint */}
+      {importHint && (
+        <div className="flex items-start gap-2 bg-amber-950/20 border border-amber-900/30 rounded-lg px-3 py-2">
+          <Sparkles className="w-3.5 h-3.5 text-amber-400 mt-0.5 shrink-0" />
+          <p className="text-amber-200/70 text-xs">{importHint}</p>
+          <button onClick={() => setImportHint('')} className="text-amber-400/50 hover:text-amber-300 shrink-0">
+            <X className="w-3 h-3" />
+          </button>
+        </div>
       )}
 
       {/* Entry list */}

@@ -94,7 +94,7 @@ export function SitemapWizard({ templateEntry, onTemplateConsumed, onSaved, onGe
   const [copied, setCopied] = useState(false)
   const [showSaveDialog, setShowSaveDialog] = useState(false)
   const [savedToKB, setSavedToKB] = useState(false)
-  const [resultTab, setResultTab] = useState<string>('code')
+  const [resultTab, setResultTab] = useState<string>('review')
   const [fromTemplate, setFromTemplate] = useState(false)
 
   // Notify parent of generationResult changes
@@ -165,7 +165,7 @@ export function SitemapWizard({ templateEntry, onTemplateConsumed, onSaved, onGe
       if (!res.ok) throw new Error(data.error)
       setGenerationResult(data as GenerationResult)
       setSavedToKB(false)
-      setResultTab('code')
+      setResultTab('review')
       setStep('done')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Generation failed')
@@ -190,7 +190,7 @@ export function SitemapWizard({ templateEntry, onTemplateConsumed, onSaved, onGe
     setError('')
     setShowSaveDialog(false)
     setSavedToKB(false)
-    setResultTab('code')
+    setResultTab('review')
     setFromTemplate(false)
   }
 

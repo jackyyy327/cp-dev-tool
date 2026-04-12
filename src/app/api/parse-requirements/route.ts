@@ -61,7 +61,18 @@ Return ONLY a valid JSON array, no explanation or markdown.`
       sampleUrls: item.sampleUrls || '',
     }))
 
-    return NextResponse.json({ entries })
+    // Validation hints
+    const emptyRules = entries.filter(e => !e.rule.trim()).length
+    const emptyUrls = entries.filter(e => !e.sampleUrls.trim()).length
+
+    return NextResponse.json({
+      entries,
+      validation: {
+        total: entries.length,
+        emptyRules,
+        emptyUrls,
+      },
+    })
   } catch (error) {
     console.error('Parse requirements error:', error)
     return NextResponse.json(
