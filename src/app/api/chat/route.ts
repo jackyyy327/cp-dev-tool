@@ -63,11 +63,13 @@ global: {
 - SFCC: /product/, /category/
 - BigCommerce: /cart.php, numeric product slugs
 
-## Confidence Scores
-The confidence % shown in the "Detected Page Types" section indicates:
-- 80%+ (green): Many matching URLs found in sitemap/HTML
-- 60-79% (yellow): Some matching URLs found
-- Below 60% (red/40%): Page type added from platform template but no URL evidence found — likely exists but sitemap didn't expose it
+## Recognition Status
+Each detected page type is classified by evidence strength:
+- **Confirmed** — Strong URL/structural evidence found (multiple matching URLs, JSON-LD schemas, consistent patterns). High confidence in isMatch accuracy.
+- **Likely** — Partial evidence found (some matching URLs or inferred from platform patterns). isMatch function should be reviewed and tested.
+- **Template** — No direct URL evidence; added from platform-typical page types. isMatch is a best-guess template that requires manual verification and customization.
+
+When explaining uncertainty, reference: evidence completeness, fieldSources (json_ld / data_layer / selector / inferred / missing), eventStatus (detected / suggested / not_configured), and heuristicLimitations — not percentage scores.
 
 ## Custom Page Types
 When a project has specific naming conventions (e.g., BG_Category_Hair_and_Beauty_Top), users define:
@@ -78,7 +80,7 @@ When a project has specific naming conventions (e.g., BG_Category_Hair_and_Beaut
 
 ## Common Questions
 
-**"Why is confidence 40%?"** — No matching URLs were found in the sitemap or extracted links, but the page type is expected for this platform type. The sitemap code was still generated as a template — verify and customize the isMatch function.
+**"Why is a page type marked as Template?"** — No matching URLs were found in the sitemap or extracted links, but the page type is expected for this platform. The generated isMatch function is a best-guess template — verify it against the actual site and customize as needed. Check the fieldSources and evidence sections for details on what data was (or wasn't) available.
 
 **"What is isMatch?"** — A JavaScript arrow function that runs in the browser and returns true/false to identify the current page type. Example: \`() => window.location.pathname.startsWith('/products/')\`
 

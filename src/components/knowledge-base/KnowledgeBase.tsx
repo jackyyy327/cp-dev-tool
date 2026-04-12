@@ -5,7 +5,7 @@ import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import type { SitemapEntry, Platform, SiteType, RecognitionStatus } from '@/types/sitemap'
-import { Search, Globe, Calendar, Tag, BookOpen, Filter, FileSearch, CheckCircle2, AlertTriangle, HelpCircle } from 'lucide-react'
+import { Search, Globe, Calendar, Tag, BookOpen, Filter, FileSearch, CheckCircle2, AlertTriangle, HelpCircle, ChevronDown, ChevronUp, TriangleAlert } from 'lucide-react'
 
 const PLATFORM_LABELS: Record<string, string> = {
   shopify: 'Shopify',
@@ -139,6 +139,8 @@ function SitemapCard({ entry, onDeleted, onUseAsTemplate }: {
   onDeleted: () => void
   onUseAsTemplate?: (entry: SitemapEntry) => void
 }) {
+  const [expanded, setExpanded] = useState(false)
+
   async function handleDelete() {
     if (!confirm(`「${entry.name}」を削除しますか？`)) return
     await fetch(`/api/sitemaps?id=${entry.id}`, { method: 'DELETE' })
@@ -148,6 +150,8 @@ function SitemapCard({ entry, onDeleted, onUseAsTemplate }: {
   function handleUseAsTemplate() {
     onUseAsTemplate?.(entry)
   }
+
+  const gr = entry.generationResult
 
   return (
     <Card className="bg-gray-900 border-gray-800 p-4 hover:border-gray-700 transition-colors group">
@@ -185,15 +189,73 @@ function SitemapCard({ entry, onDeleted, onUseAsTemplate }: {
       )}
 
       {/* Structured analysis summary */}
-      {entry.generationResult && (
+      {gr ? (
         <div className="mb-3 space-y-1.5">
           <div className="flex items-start gap-1.5">
             <FileSearch className="w-3 h-3 text-blue-400 mt-0.5 shrink-0" />
-            <p className="text-gray-400 text-xs line-clamp-2">{entry.generationResult.summary.overallAssessment}</p>
+            <p className={`text-gray-400 text-xs ${expanded ? '' : 'line-clamp-2'}`}>
+              {gr.summary.overallAssessment}
+            </p>
           </div>
-          {entry.generationResult.pageTypes.length > 0 && (
-            <PageTypeStatusSummary pageTypes={entry.generationResult.pageTypes} />
+          <div className="flex items-center gap-3 text-xs flex-wrap">
+            {gr.pageTypes.length > 0 && (
+              <span className="text-gray-500">
+                {gr.pageTypes.length} ページタイプ
+              </span>
+            )}
+            {gr.summary.globalRisks.length > 0 && (
+              <span className="text-red-400/70">
+                {gr.summary.globalRisks.length} リスク
+              </span>
+            )}
+          </div>
+          {gr.pageTypes.length > 0 && (
+            <PageTypeStatusSummary pageTypes={gr.pageTypes} />
           )}
+
+          {/* Expanded detail */}
+          {expanded && (
+            <div className="pt-1.5 space-y-2 border-t border-gray-800 mt-1.5">
+              {gr.summary.globalRisks.length > 0 && (
+                <div>
+                  <span className="text-red-400 text-xs font-medium flex items-center gap-1 mb-1">
+                    <TriangleAlert className="w-3 h-3" />
+                    リスク
+                  </span>
+                  <ul className="space-y-0.5">
+                    {gr.summary.globalRisks.map((risk, i) => (
+                      <li key={i} className="text-xs text-red-300/70">&#x2022; {risk}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {gr.summary.nextActions.length > 0 && (
+                <div>
+                  <span className="text-green-400 text-xs font-medium mb-1 block">次のアクション</span>
+                  <ul className="space-y-0.5">
+                    {gr.summary.nextActions.map((a, i) => (
+                      <li key={i} className="text-xs text-green-300/70">&#x2022; {a}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Expand toggle */}
+          {(gr.summary.globalRisks.length > 0 || gr.summary.nextActions.length > 0 || gr.summary.overallAssessment.length > 100) && (
+            <button
+              onClick={() => setExpanded(v => !v)}
+              className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-300 transition-colors"
+            >
+              {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+              {expanded ? '閉じる' : '詳細を表示'}
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="mb-3">
+          <p className="text-gray-600 text-xs">構造化分析データなし</p>
         </div>
       )}
 

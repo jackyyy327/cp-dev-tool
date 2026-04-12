@@ -5,12 +5,34 @@ import { SitemapWizard } from '@/components/editor/SitemapWizard'
 import { KnowledgeBase } from '@/components/knowledge-base/KnowledgeBase'
 import { ChatPanel } from '@/components/chat/ChatPanel'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import type { SitemapEntry } from '@/types/sitemap'
+import type { SitemapEntry, GenerationResult } from '@/types/sitemap'
 import { Sparkles, BookOpen, Zap } from 'lucide-react'
+import { useCallback } from 'react'
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState('generate')
   const [templateEntry, setTemplateEntry] = useState<SitemapEntry | null>(null)
+  const [chatContext, setChatContext] = useState<string | undefined>(undefined)
+
+  const handleGenerationResultChange = useCallback((result: GenerationResult | null) => {
+    if (!result) {
+      setChatContext(undefined)
+      return
+    }
+    const parts: string[] = []
+    parts.push(`総合評価: ${result.summary.overallAssessment}`)
+    if (result.pageTypes.length > 0) {
+      const names = result.pageTypes.map(pt => `${pt.name} (${pt.recognitionStatus})`).join(', ')
+      parts.push(`ページタイプ: ${names}`)
+    }
+    if (result.summary.globalRisks.length > 0) {
+      parts.push(`リスク: ${result.summary.globalRisks.join('; ')}`)
+    }
+    if (result.summary.heuristicLimitations.length > 0) {
+      parts.push(`制限事項: ${result.summary.heuristicLimitations.join('; ')}`)
+    }
+    setChatContext(parts.join('\n'))
+  }, [])
 
   function handleUseAsTemplate(entry: SitemapEntry) {
     setTemplateEntry(entry)
@@ -65,6 +87,7 @@ export default function Home() {
             <SitemapWizard
               templateEntry={templateEntry}
               onTemplateConsumed={() => setTemplateEntry(null)}
+              onGenerationResultChange={handleGenerationResultChange}
             />
           </TabsContent>
 
@@ -75,7 +98,7 @@ export default function Home() {
       </main>
     </div>
 
-    <ChatPanel />
+    <ChatPanel context={chatContext} />
     </>
   )
 }

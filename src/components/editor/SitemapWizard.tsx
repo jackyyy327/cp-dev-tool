@@ -31,6 +31,7 @@ import {
   FileSearch,
   TriangleAlert,
   Info,
+  Pencil,
 } from 'lucide-react'
 
 type Step = 'input' | 'crawling' | 'review' | 'generating' | 'done'
@@ -78,9 +79,10 @@ interface SitemapWizardProps {
   templateEntry?: SitemapEntry | null
   onTemplateConsumed?: () => void
   onSaved?: () => void
+  onGenerationResultChange?: (result: GenerationResult | null) => void
 }
 
-export function SitemapWizard({ templateEntry, onTemplateConsumed, onSaved }: SitemapWizardProps) {
+export function SitemapWizard({ templateEntry, onTemplateConsumed, onSaved, onGenerationResultChange }: SitemapWizardProps) {
   const [step, setStep] = useState<Step>('input')
   const [url, setUrl] = useState('')
   const [customNotes, setCustomNotes] = useState('')
@@ -93,6 +95,12 @@ export function SitemapWizard({ templateEntry, onTemplateConsumed, onSaved }: Si
   const [showSaveDialog, setShowSaveDialog] = useState(false)
   const [savedToKB, setSavedToKB] = useState(false)
   const [resultTab, setResultTab] = useState<string>('code')
+  const [fromTemplate, setFromTemplate] = useState(false)
+
+  // Notify parent of generationResult changes
+  useEffect(() => {
+    onGenerationResultChange?.(generationResult)
+  }, [generationResult]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Derived
   const generatedCode = generationResult?.code ?? ''
@@ -120,6 +128,7 @@ export function SitemapWizard({ templateEntry, onTemplateConsumed, onSaved }: Si
       setCrawlResult(templateEntry.crawlResult)
     }
     setStep('done')
+    setFromTemplate(true)
     setSavedToKB(false)
     setShowSaveDialog(false)
     onTemplateConsumed?.()
@@ -182,6 +191,17 @@ export function SitemapWizard({ templateEntry, onTemplateConsumed, onSaved }: Si
     setShowSaveDialog(false)
     setSavedToKB(false)
     setResultTab('code')
+    setFromTemplate(false)
+  }
+
+  function handleEditFromTemplate() {
+    if (crawlResult) {
+      setStep('review')
+    } else {
+      setStep('input')
+    }
+    setFromTemplate(false)
+    setSavedToKB(false)
   }
 
   function handleSaved() {
@@ -441,6 +461,17 @@ export function SitemapWizard({ templateEntry, onTemplateConsumed, onSaved }: Si
                 </Button>
               )}
 
+              {fromTemplate && (
+                <Button
+                  onClick={handleEditFromTemplate}
+                  variant="outline"
+                  className="border-violet-800 text-violet-300 hover:bg-violet-950/40 flex items-center gap-2"
+                >
+                  <Pencil className="w-4 h-4" />
+                  テンプレートを再編集
+                </Button>
+              )}
+
               <Button onClick={handleReset} variant="outline" className="border-gray-700 text-gray-400 hover:bg-gray-800 ml-auto">
                 新しいプロジェクト
               </Button>
@@ -481,7 +512,7 @@ export function SitemapWizard({ templateEntry, onTemplateConsumed, onSaved }: Si
 
       {/* Right pane: Results Workbench */}
       <div className="rounded-xl overflow-hidden border border-gray-800 bg-gray-900 flex flex-col">
-        {step === 'done' && generationResult ? (
+        {generationResult ? (
           /* Tabbed results when generation is complete with analysis */
           <Tabs defaultValue="code" value={resultTab} onValueChange={v => setResultTab(v as string)}>
             <div className="flex items-center justify-between px-4 py-2 border-b border-gray-800 bg-gray-900/80">
@@ -712,8 +743,8 @@ export function SitemapWizard({ templateEntry, onTemplateConsumed, onSaved }: Si
                     <AlertCircle className="w-8 h-8 text-amber-500 mb-3" />
                     <h4 className="text-white font-medium text-sm mb-1">ページタイプ別の分析データがありません</h4>
                     <p className="text-gray-500 text-xs leading-relaxed max-w-xs">
-                      この生成ではページタイプ別の詳細分析が取得できませんでした。
-                      Reviewタブの総合評価・リスク・次のアクションを確認し、コードの手動レビューを重点的に行ってください。
+                      この結果には総合レビューのフィードバックが含まれていますが、ページタイプ単位のエビデンスを抽出できませんでした。
+                      テンプレートとして再利用する前に、Review タブでリスク・制限事項・次のアクションを確認してください。
                     </p>
                   </div>
                 )}
@@ -721,36 +752,19 @@ export function SitemapWizard({ templateEntry, onTemplateConsumed, onSaved }: Si
             </TabsContent>
           </Tabs>
         ) : (
-          /* Default: code-only view (during input/crawling/generating steps) */
+          /* Default: placeholder view before generation */
           <>
-            <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-800 bg-gray-900/80">
+            <div className="flex items-center px-4 py-2.5 border-b border-gray-800 bg-gray-900/80">
               <div className="flex items-center gap-2">
                 <Code2 className="w-4 h-4 text-gray-500" />
                 <span className="text-xs text-gray-400 font-medium">sitemap.js</span>
               </div>
-              {generatedCode && (
-                <div className="flex items-center gap-2">
-                  {savedToKB && (
-                    <Badge className="bg-green-900/40 text-green-400 border-green-800 text-xs flex items-center gap-1">
-                      <BookOpen className="w-3 h-3" />
-                      KB保存済み
-                    </Badge>
-                  )}
-                  <Badge className="bg-green-900/40 text-green-400 border-green-800 text-xs">
-                    生成完了
-                  </Badge>
-                </div>
-              )}
             </div>
             <div className="flex-1">
               <MonacoPane
-                value={generatedCode || '// 生成されたサイトマップコードがここに表示されます...'}
-                onChange={(val) => {
-                  if (generationResult) {
-                    setGenerationResult({ ...generationResult, code: val })
-                  }
-                }}
-                readOnly={!generatedCode}
+                value={'// 生成されたサイトマップコードがここに表示されます...'}
+                onChange={() => {}}
+                readOnly
               />
             </div>
           </>
