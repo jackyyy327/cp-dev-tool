@@ -22,8 +22,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'crawlResult is required' }, { status: 400 })
     }
 
-    const code = await generateSitemapCode(crawlResult, customNotes, customPageTypes, gtmData)
-    return NextResponse.json({ code })
+    const result = await generateSitemapCode(crawlResult, customNotes, customPageTypes, gtmData)
+    return NextResponse.json(result)
   } catch (error) {
     console.error('Generate error:', error)
     return NextResponse.json(

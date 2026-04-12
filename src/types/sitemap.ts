@@ -59,6 +59,45 @@ export interface SitemapConfig {
   }
 }
 
+// --- Generation Result Types ---
+
+export type RecognitionStatus = 'confirmed' | 'likely' | 'template'
+
+export type FieldSourceType = 'json_ld' | 'data_layer' | 'selector' | 'inferred' | 'missing'
+
+export type EventStatusType = 'detected' | 'suggested' | 'not_configured'
+
+export interface FieldSource {
+  field: string
+  source: FieldSourceType
+  detail?: string
+}
+
+export interface PageTypeAnalysis {
+  name: string
+  recognitionStatus: RecognitionStatus
+  sampleUrls: string[]
+  evidence: string[]
+  fieldSources: FieldSource[]
+  eventStatus: EventStatusType
+  eventDetails?: string
+  risks: string[]
+  recommendedFixes: string[]
+}
+
+export interface SitemapSummary {
+  overallAssessment: string
+  globalRisks: string[]
+  nextActions: string[]
+  heuristicLimitations: string[]
+}
+
+export interface GenerationResult {
+  code: string
+  summary: SitemapSummary
+  pageTypes: PageTypeAnalysis[]
+}
+
 // Knowledge base entry
 export interface SitemapEntry {
   id: string
