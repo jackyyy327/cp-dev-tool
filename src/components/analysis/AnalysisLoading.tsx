@@ -80,9 +80,10 @@ export function AnalysisLoading() {
   return (
     <div className="min-h-screen bg-gray-950 text-white">
       <header className="border-b border-gray-800 bg-gray-900/50">
-        <div className="max-w-screen-xl mx-auto px-6 h-14 flex items-center">
-          <span className="font-semibold text-sm tracking-tight">Sitemap Consultant Workbench</span>
-          <span className="ml-3 text-gray-600 text-xs">Analyzing {state.siteUrlInput}</span>
+        <div className="max-w-screen-xl mx-auto px-6 h-16 flex items-center">
+          <span className="font-semibold text-xl tracking-tight">Salesforce Personalization Workbench</span>
+          <span className="ml-3 text-gray-500 text-sm">By DentsuDigital</span>
+          <span className="ml-4 text-gray-600 text-xs">Analyzing {state.siteUrlInput}</span>
         </div>
       </header>
 

@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Sitemap Consultant Workbench",
+  title: "Salesforce Personalization Workbench",
   description:
     "Turn website requirements into a structured Salesforce Personalization sitemap design and editable implementation draft.",
 };
