@@ -26,19 +26,22 @@ export async function samplePages(entryUrl: string, maxPages = 8): Promise<RawSa
     if (picks.length >= maxPages - 1) break
   }
 
-  for (const path of picks.slice(0, maxPages - 1)) {
-    try {
-      const page = await fetchPage(origin + path)
-      samples.push({
-        url: path,
-        title: page.title,
-        signals: collectSignals(page.html),
-        html: page.html,
-      })
-    } catch {
-      // skip failed sample
-    }
-  }
+  const results = await Promise.all(
+    picks.slice(0, maxPages - 1).map(async (path) => {
+      try {
+        const page = await fetchPage(origin + path, 6000)
+        return {
+          url: path,
+          title: page.title,
+          signals: collectSignals(page.html),
+          html: page.html,
+        } as RawSample
+      } catch {
+        return null
+      }
+    }),
+  )
+  for (const r of results) if (r) samples.push(r)
   return samples
 }
 

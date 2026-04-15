@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useAnalysisStore } from '@/lib/analysis-store'
 import type { AnalysisResult } from '@/types/analysis'
 import { Button } from '@/components/ui/button'
@@ -32,12 +32,8 @@ const STEPS = [
 export function AnalysisLoading() {
   const { state, actions } = useAnalysisStore()
   const [activeStep, setActiveStep] = useState(0)
-  const started = useRef(false)
 
   useEffect(() => {
-    if (started.current) return
-    started.current = true
-
     const stepTimers: ReturnType<typeof setTimeout>[] = []
     // Visual progression: step forward at a steady pace, capped at the last "in-progress" step.
     stepTimers.push(setTimeout(() => setActiveStep(1), 600))
