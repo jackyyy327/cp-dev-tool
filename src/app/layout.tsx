@@ -13,8 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "MCP Dev Tool — パーソナライゼーション自動化ツール",
-  description: "Salesforce Marketing Cloud Personalization のサイトマップ生成・分析を自動化するチーム向け開発ツール",
+  title: "Sitemap Consultant Workbench",
+  description:
+    "Turn website requirements into a structured Salesforce Personalization sitemap design and editable implementation draft.",
 };
 
 export default function RootLayout({
@@ -24,7 +25,7 @@ export default function RootLayout({
 }>) {
   return (
     <html
-      lang="ja"
+      lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">{children}</body>
