@@ -11,6 +11,7 @@ import type {
   AnalysisResult,
   DataObjectDraft,
   EventDraft,
+  FailureKind,
   PageTypeDraft,
   Phase,
   RequirementInput,
@@ -23,13 +24,14 @@ interface State {
   analysis: AnalysisResult | null
   selectedPageTypeId: string | null
   error: string | null
+  errorKind: FailureKind | null
 }
 
 type Action =
   | { type: 'SET_PHASE'; phase: Phase }
   | { type: 'SET_INPUT'; siteUrl: string; requirement: RequirementInput }
   | { type: 'SET_ANALYSIS'; analysis: AnalysisResult }
-  | { type: 'SET_ERROR'; error: string }
+  | { type: 'SET_ERROR'; error: string; kind: FailureKind }
   | { type: 'SELECT_PAGE_TYPE'; id: string }
   | { type: 'RENAME_PAGE_TYPE'; id: string; name: string }
   | { type: 'DELETE_PAGE_TYPE'; id: string }
@@ -52,6 +54,7 @@ const initialState: State = {
   analysis: null,
   selectedPageTypeId: null,
   error: null,
+  errorKind: null,
 }
 
 function mapAnalysis(
@@ -72,6 +75,7 @@ function reducer(state: State, action: Action): State {
         siteUrlInput: action.siteUrl,
         requirementInput: action.requirement,
         error: null,
+        errorKind: null,
       }
     case 'SET_ANALYSIS':
       return {
@@ -79,9 +83,10 @@ function reducer(state: State, action: Action): State {
         analysis: action.analysis,
         selectedPageTypeId: action.analysis.pageTypes[0]?.id ?? null,
         error: null,
+        errorKind: null,
       }
     case 'SET_ERROR':
-      return { ...state, error: action.error }
+      return { ...state, error: action.error, errorKind: action.kind }
     case 'SELECT_PAGE_TYPE':
       return { ...state, selectedPageTypeId: action.id }
     case 'RENAME_PAGE_TYPE':
@@ -252,8 +257,8 @@ export function AnalysisStoreProvider({ children }: { children: ReactNode }) {
         dispatch({ type: 'SET_ANALYSIS', analysis })
         dispatch({ type: 'SET_PHASE', phase: 'workbench' })
       },
-      failLoading: (error: string) => {
-        dispatch({ type: 'SET_ERROR', error })
+      failLoading: (error: string, kind: FailureKind = 'UrlFetchFailure') => {
+        dispatch({ type: 'SET_ERROR', error, kind })
       },
       goToWorkbench: () => dispatch({ type: 'SET_PHASE', phase: 'workbench' }),
       goToResult: () => dispatch({ type: 'SET_PHASE', phase: 'result' }),

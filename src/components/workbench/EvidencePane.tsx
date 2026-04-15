@@ -4,14 +4,29 @@ import { useAnalysisStore } from '@/lib/analysis-store'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import type { Evidence, EvidenceKind, PageTypeDraft } from '@/types/analysis'
-import { Check, X, ShieldAlert, Link2, FileText, Target, Gauge } from 'lucide-react'
+import {
+  Check,
+  X,
+  ShieldAlert,
+  Link2,
+  FileText,
+  Target,
+  Gauge,
+  Scale,
+  GitCompare,
+} from 'lucide-react'
 
-const KIND_META: Record<EvidenceKind, { label: string; icon: React.ComponentType<{ className?: string }>; color: string }> = {
+const KIND_META: Record<
+  EvidenceKind,
+  { label: string; icon: React.ComponentType<{ className?: string }>; color: string }
+> = {
   UrlPattern: { label: 'URL Pattern', icon: Link2, color: 'text-blue-400' },
   PageSignal: { label: 'Page Signal', icon: FileText, color: 'text-cyan-400' },
   RequirementMatch: { label: 'Requirement Match', icon: Target, color: 'text-violet-400' },
   Confidence: { label: 'Confidence', icon: Gauge, color: 'text-green-400' },
   Risk: { label: 'Risk', icon: ShieldAlert, color: 'text-red-400' },
+  Scoring: { label: 'Classification', icon: Scale, color: 'text-amber-400' },
+  Competing: { label: 'Competing', icon: GitCompare, color: 'text-orange-400' },
 }
 
 interface Props {
@@ -30,22 +45,55 @@ export function EvidencePane({ pageType }: Props) {
     <aside className="space-y-4">
       <Card size="sm" className="bg-gray-900 border-gray-800 px-4">
         <h3 className="text-xs uppercase tracking-wide text-gray-500 font-medium">Evidence</h3>
+        {pageType && (
+          <div className="text-[11px] text-gray-500 mb-2">
+            Confidence: <span className={confColor(pageType.confidence)}>{pageType.confidence}</span>
+          </div>
+        )}
         {evidenceList.length === 0 ? (
           <p className="text-xs text-gray-600">No evidence attached to this Page Type.</p>
         ) : (
-          <ul className="space-y-2">
+          <ul className="space-y-3">
             {evidenceList.map((ev) => {
               const meta = KIND_META[ev.kind]
               const Icon = meta.icon
               return (
                 <li key={ev.id} className="flex gap-2">
                   <Icon className={'w-3.5 h-3.5 mt-0.5 shrink-0 ' + meta.color} />
-                  <div className="min-w-0">
+                  <div className="min-w-0 space-y-1">
                     <div className="text-[10px] uppercase tracking-wide text-gray-600">
                       {meta.label}
+                      {ev.source && ev.source !== ev.kind ? ' · ' + ev.source : ''}
                     </div>
-                    <div className="text-xs text-gray-200 font-mono break-words">{ev.label}</div>
-                    <div className="text-[11px] text-gray-500">{ev.detail}</div>
+                    <div className="text-xs text-gray-100 font-medium break-words">{ev.label}</div>
+                    <div className="text-[11px] text-gray-500 leading-snug">{ev.detail}</div>
+                    {ev.matched && ev.matched.length > 0 && (
+                      <div className="flex flex-wrap gap-1 pt-0.5">
+                        {ev.matched.slice(0, 8).map((m, i) => (
+                          <span
+                            key={i}
+                            className="text-[10px] font-mono bg-gray-950 border border-gray-800 text-gray-400 rounded px-1.5 py-0.5"
+                          >
+                            {m}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {ev.confidenceReason && (
+                      <div className="text-[11px] text-green-400/70 italic">
+                        Why: {ev.confidenceReason}
+                      </div>
+                    )}
+                    {ev.competingInterpretation && (
+                      <div className="text-[11px] text-orange-300/80">
+                        Could also be: {ev.competingInterpretation}
+                      </div>
+                    )}
+                    {ev.consultantAction && (
+                      <div className="text-[11px] text-violet-300/80">
+                        Next: {ev.consultantAction}
+                      </div>
+                    )}
                   </div>
                 </li>
               )
@@ -106,4 +154,10 @@ export function EvidencePane({ pageType }: Props) {
       </Card>
     </aside>
   )
+}
+
+function confColor(c: 'high' | 'medium' | 'low'): string {
+  if (c === 'high') return 'text-green-400'
+  if (c === 'medium') return 'text-amber-400'
+  return 'text-red-400'
 }

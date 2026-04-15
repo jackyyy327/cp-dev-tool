@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useAnalysisStore } from '@/lib/analysis-store'
-import type { AnalysisResult } from '@/types/analysis'
+import type { AnalysisResult, FailureKind } from '@/types/analysis'
 import { Button } from '@/components/ui/button'
 import { Check, Loader2, CircleDashed, AlertTriangle } from 'lucide-react'
 
@@ -53,18 +53,21 @@ export function AnalysisLoading() {
       .then(async (res) => {
         if (!res.ok) {
           const body = await res.json().catch(() => ({}))
-          throw new Error(body.error || 'Analysis failed with HTTP ' + res.status)
+          const err = new Error(body.error || 'Analysis failed with HTTP ' + res.status) as Error & {
+            kind?: FailureKind
+          }
+          err.kind = (body.kind as FailureKind) || 'UrlFetchFailure'
+          throw err
         }
         return (await res.json()) as AnalysisResult
       })
       .then((analysis) => {
         setActiveStep(STEPS.length)
-        // Brief pause so the user sees the final step tick over before route change.
         setTimeout(() => actions.finishLoading(analysis), 300)
       })
-      .catch((err: Error) => {
+      .catch((err: Error & { kind?: FailureKind }) => {
         if (err.name === 'AbortError') return
-        actions.failLoading(err.message || 'Unknown analysis error')
+        actions.failLoading(err.message || 'Unknown analysis error', err.kind ?? 'UrlFetchFailure')
       })
 
     return () => {
@@ -90,7 +93,7 @@ export function AnalysisLoading() {
         </p>
 
         {state.error ? (
-          <ErrorPanel error={state.error} onBack={actions.backToInput} />
+          <ErrorPanel error={state.error} kind={state.errorKind} onBack={actions.backToInput} />
         ) : (
           <>
             <section className="mb-8">
@@ -160,20 +163,56 @@ export function AnalysisLoading() {
   )
 }
 
-function ErrorPanel({ error, onBack }: { error: string; onBack: () => void }) {
+const KIND_META: Record<FailureKind, { title: string; hint: string }> = {
+  UrlFetchFailure: {
+    title: 'URL fetch failed',
+    hint: 'The entry URL could not be retrieved. Check that it is reachable from this machine, the protocol (https vs http), and that the path resolves to HTML.',
+  },
+  SamplingFailure: {
+    title: 'Sampling failed',
+    hint: 'The entry page loaded but no additional sample pages could be crawled. The site may be gating navigation behind JavaScript or rate-limiting requests.',
+  },
+  RequirementParseFailure: {
+    title: 'Requirement parse failed',
+    hint: 'The requirement text could not be interpreted. Rephrase using consultant-style sentences such as "Track product detail views" or "Capture add to cart".',
+  },
+  LowConfidenceAnalysis: {
+    title: 'Low-confidence analysis',
+    hint: 'Results were produced but should be treated as provisional. Review every page type before generating production code.',
+  },
+  BlockedByAntiBot: {
+    title: 'Blocked by anti-bot / WAF',
+    hint: 'The site returned 403/429 — it is rejecting the analyzer\'s request. Try a different entry URL, or run this against a staging environment.',
+  },
+  SpaLowVisibility: {
+    title: 'SPA shell — low DOM visibility',
+    hint: 'The page rendered as a client-side shell with little pre-rendered HTML. DOM signals are unreliable; expect mostly low-confidence output.',
+  },
+}
+
+function ErrorPanel({
+  error,
+  kind,
+  onBack,
+}: {
+  error: string
+  kind: FailureKind | null
+  onBack: () => void
+}) {
+  const meta = kind ? KIND_META[kind] : KIND_META.UrlFetchFailure
   return (
     <div className="bg-red-950/20 border border-red-900 rounded-lg p-6">
       <div className="flex items-start gap-3 mb-4">
         <AlertTriangle className="w-5 h-5 text-red-400 mt-0.5" />
         <div className="flex-1">
-          <h2 className="text-sm font-semibold text-red-200 mb-1">Analysis failed</h2>
+          <div className="text-[10px] uppercase tracking-wide text-red-400/70 mb-0.5">
+            {kind ?? 'UrlFetchFailure'}
+          </div>
+          <h2 className="text-sm font-semibold text-red-200 mb-1">{meta.title}</h2>
           <p className="text-sm text-red-300/80 break-words">{error}</p>
         </div>
       </div>
-      <div className="text-xs text-red-300/60 mb-4">
-        The site could not be crawled. Check that the URL is reachable from this machine and
-        returns HTML (not a JS-only SPA shell or a login wall), then try again.
-      </div>
+      <div className="text-xs text-red-300/60 mb-4">{meta.hint}</div>
       <Button
         onClick={onBack}
         variant="outline"

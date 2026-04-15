@@ -86,6 +86,16 @@ export type EvidenceKind =
   | 'RequirementMatch'
   | 'Confidence'
   | 'Risk'
+  | 'Scoring'
+  | 'Competing'
+
+export type EvidenceSource =
+  | 'UrlPattern'
+  | 'DomSignal'
+  | 'StructuredData'
+  | 'Metadata'
+  | 'RequirementText'
+  | 'SampleCoverage'
 
 export interface Evidence {
   id: string
@@ -93,7 +103,20 @@ export interface Evidence {
   label: string
   detail: string
   pageTypeRef?: string
+  source?: EvidenceSource
+  matched?: string[]
+  confidenceReason?: string
+  competingInterpretation?: string
+  consultantAction?: string
 }
+
+export type FailureKind =
+  | 'UrlFetchFailure'
+  | 'SamplingFailure'
+  | 'RequirementParseFailure'
+  | 'LowConfidenceAnalysis'
+  | 'BlockedByAntiBot'
+  | 'SpaLowVisibility'
 
 export type MappingStatus = 'mapped' | 'unmapped' | 'needsConfirmation'
 

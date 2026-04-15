@@ -12,14 +12,35 @@ interface Cluster {
   pages: RawSample[]
 }
 
-type Classification = 'home' | 'product' | 'category' | 'cart' | 'search' | 'other'
+type Classification =
+  | 'home'
+  | 'product'
+  | 'category'
+  | 'search'
+  | 'cart'
+  | 'checkout'
+  | 'content'
+  | 'other'
 
-export function synthesize(samples: RawSample[]): {
+interface ScoreBreakdown {
+  score: number
+  hits: string[]
+}
+
+interface ClassScore {
+  class: Classification
+  score: number
+  hits: string[]
+}
+
+export interface SynthesizeOutput {
   pageTypes: PageTypeDraft[]
   dataObjects: DataObjectDraft[]
   events: EventDraft[]
   evidence: Evidence[]
-} {
+}
+
+export function synthesize(samples: RawSample[]): SynthesizeOutput {
   const clusters = clusterSamples(samples)
   const pageTypes: PageTypeDraft[] = []
   const dataObjects: DataObjectDraft[] = []
@@ -29,70 +50,130 @@ export function synthesize(samples: RawSample[]): {
   for (const cluster of clusters) {
     const id = 'pt_' + hash(cluster.template)
     const first = cluster.pages[0]
-    const signalSet = new Set<string>()
-    cluster.pages.forEach((p) => p.signals.forEach((s) => signalSet.add(s)))
-    const classification = classify(cluster.template, signalSet)
+    const sigSet = new Set<string>()
+    cluster.pages.forEach((p) => p.signals.forEach((s) => sigSet.add(s)))
+    const anySpaShell = cluster.pages.some((p) => p.spaShell)
+    const samplePaths = cluster.pages.map((p) => p.url)
+
+    const scores = scoreClasses(cluster.template, sigSet, samplePaths)
+    const [top, runnerUp] = scores
+    // Need at least 3 points to commit to a class — weaker matches are almost
+    // always site-wide signal leakage and should land in "other".
+    const winner: Classification = top.score >= 3 ? top.class : 'other'
+    const confidence = confidenceFromScore(top.score, runnerUp?.score ?? 0, anySpaShell, sigSet.size)
     const evRefs: string[] = []
 
-    const urlEvidence: Evidence = {
+    // URL pattern evidence
+    const urlEv: Evidence = {
       id: 'ev_url_' + hash(cluster.template),
       kind: 'UrlPattern',
+      source: 'UrlPattern',
       label: cluster.template,
       detail:
         cluster.pages.length +
         ' sampled page' +
         (cluster.pages.length === 1 ? '' : 's') +
-        ' match this pattern',
+        ' match this path template',
+      matched: samplePaths,
       pageTypeRef: id,
     }
-    evidence.push(urlEvidence)
-    evRefs.push(urlEvidence.id)
+    evidence.push(urlEv)
+    evRefs.push(urlEv.id)
 
-    if (signalSet.size > 0) {
-      const signalEvidence: Evidence = {
+    // Scoring evidence (the "why this class" explanation)
+    const scoringEv: Evidence = {
+      id: 'ev_score_' + hash(cluster.template),
+      kind: 'Scoring',
+      source: classificationSource(winner),
+      label: humanClassName(winner) + ' — score ' + top.score,
+      detail: scoreDetail(winner, top),
+      matched: top.hits,
+      confidenceReason: reasonForConfidence(confidence, top, runnerUp, anySpaShell),
+      competingInterpretation:
+        runnerUp && runnerUp.score >= Math.max(2, top.score - 1)
+          ? humanClassName(runnerUp.class) + ' (score ' + runnerUp.score + ', ' + runnerUp.hits.slice(0, 3).join(' + ') + ')'
+          : undefined,
+      consultantAction: consultantActionFor(winner, confidence, runnerUp),
+      pageTypeRef: id,
+    }
+    evidence.push(scoringEv)
+    evRefs.push(scoringEv.id)
+
+    // Page signal evidence — list concrete signals that fired
+    if (sigSet.size > 0) {
+      const sigList = Array.from(sigSet)
+      const signalEv: Evidence = {
         id: 'ev_signal_' + hash(cluster.template),
         kind: 'PageSignal',
-        label: Array.from(signalSet).slice(0, 3).join(', '),
-        detail: Array.from(signalSet).join(' | '),
+        source: 'DomSignal',
+        label: sigList.slice(0, 4).join(' · '),
+        detail: 'All signals observed across sampled pages in this cluster',
+        matched: sigList,
         pageTypeRef: id,
       }
-      evidence.push(signalEvidence)
-      evRefs.push(signalEvidence.id)
+      evidence.push(signalEv)
+      evRefs.push(signalEv.id)
     }
 
+    if (anySpaShell) {
+      const spaEv: Evidence = {
+        id: 'ev_spa_' + hash(cluster.template),
+        kind: 'Risk',
+        source: 'SampleCoverage',
+        label: 'Client-rendered shell',
+        detail:
+          'This page rendered with <300 chars of visible text — likely a SPA. DOM-based signals may be unreliable until JS executes.',
+        consultantAction: 'Inspect the live page in a browser and confirm page-type assumptions',
+        pageTypeRef: id,
+      }
+      evidence.push(spaEv)
+      evRefs.push(spaEv.id)
+    }
+
+    // Create data objects and events only when winner + evidence justify them
     let objectRefs: string[] = []
     let interactionName: InteractionName | undefined
 
-    if (classification === 'product') {
+    if (winner === 'product') {
+      const strongProduct =
+        sigSet.has('jsonld:Product') || sigSet.has('og:type=product') || sigSet.has('sku hint')
       ensureObject(dataObjects, {
         id: 'do_product',
         type: 'Product',
         label: 'Product',
         fields: [
-          { name: 'id', source: signalSet.has('Product JSON-LD') ? 'jsonLd' : 'manual', required: true },
-          { name: 'name', source: signalSet.has('Product JSON-LD') ? 'jsonLd' : 'dom', selectorHint: 'h1', required: true },
-          { name: 'price', source: signalSet.has('Product JSON-LD') ? 'jsonLd' : 'dom', selectorHint: '.price', required: true },
+          { name: 'id', source: strongProduct ? 'jsonLd' : 'manual', required: true },
+          {
+            name: 'name',
+            source: strongProduct ? 'jsonLd' : 'dom',
+            selectorHint: 'h1',
+            required: true,
+          },
+          {
+            name: 'price',
+            source: strongProduct ? 'jsonLd' : 'dom',
+            selectorHint: '.price',
+            required: strongProduct,
+          },
         ],
       })
       objectRefs = ['do_product']
       interactionName = 'ViewCatalogObject'
-      if (signalSet.has('add-to-cart button') || signalSet.has('cart form')) {
-        const evId = 'ev_add_to_cart'
-        if (!events.find((e) => e.id === evId)) {
-          events.push({
-            id: evId,
-            kind: 'interaction',
-            interactionName: 'AddToCart',
-            pageTypeRefs: [id],
-            objectRef: 'do_product',
-            triggerHint: 'click on button.add-to-cart',
-          })
-        } else {
-          const e = events.find((x) => x.id === evId)!
-          if (!e.pageTypeRefs.includes(id)) e.pageTypeRefs.push(id)
-        }
+      if (
+        sigSet.has('add-to-cart control') ||
+        sigSet.has('cart form') ||
+        sigSet.has('variant selector')
+      ) {
+        upsertEvent(events, {
+          id: 'ev_add_to_cart',
+          kind: 'interaction',
+          interactionName: 'AddToCart',
+          pageTypeRefs: [id],
+          objectRef: 'do_product',
+          triggerHint: 'click on add-to-cart control',
+        })
       }
-    } else if (classification === 'category') {
+    } else if (winner === 'category') {
       ensureObject(dataObjects, {
         id: 'do_category',
         type: 'Category',
@@ -101,9 +182,9 @@ export function synthesize(samples: RawSample[]): {
       })
       objectRefs = ['do_category']
       interactionName = 'ViewCategory'
-    } else if (classification === 'search') {
+    } else if (winner === 'search') {
       interactionName = 'ViewSearch'
-    } else if (classification === 'cart') {
+    } else if (winner === 'cart') {
       ensureObject(dataObjects, {
         id: 'do_cart',
         type: 'Cart',
@@ -114,36 +195,278 @@ export function synthesize(samples: RawSample[]): {
       })
       objectRefs = ['do_cart']
       interactionName = 'ViewCart'
+    } else if (winner === 'checkout') {
+      ensureObject(dataObjects, {
+        id: 'do_order',
+        type: 'Order',
+        label: 'Order',
+        fields: [
+          { name: 'id', source: 'dom', selectorHint: '.order-number', required: true },
+          { name: 'total', source: 'dom', selectorHint: '.order-total', required: true },
+        ],
+      })
+      objectRefs = ['do_order']
+      // Purchase is an order-level interaction — only emit if confidence is high
+      if (confidence === 'high') {
+        upsertEvent(events, {
+          id: 'ev_purchase',
+          kind: 'interaction',
+          interactionName: 'Purchase',
+          pageTypeRefs: [id],
+          objectRef: 'do_order',
+          triggerHint: 'order confirmation page load',
+        })
+      }
     }
-
-    const confidence: 'high' | 'medium' | 'low' =
-      classification !== 'other' && signalSet.size >= 2
-        ? 'high'
-        : classification !== 'other'
-        ? 'medium'
-        : 'low'
 
     pageTypes.push({
       id,
-      name: nameFor(cluster.template, classification, first),
+      name: nameFor(cluster.template, winner, first),
       isMatchHint: isMatchHintFor(cluster.template),
       interactionName,
       objectRefs,
-      eventRefs: [], // filled in pass 2
-      sampleUrls: cluster.pages.map((p) => p.url),
+      eventRefs: [],
+      sampleUrls: samplePaths,
       confidence,
       status: 'suggested',
       evidenceRefs: evRefs,
     })
   }
 
-  // Pass 2 — populate pageType.eventRefs from events that target each page type.
   for (const pt of pageTypes) {
     pt.eventRefs = events.filter((e) => e.pageTypeRefs.includes(pt.id)).map((e) => e.id)
   }
 
   return { pageTypes, dataObjects, events, evidence }
 }
+
+// ——— scoring ———
+
+function scoreClasses(
+  template: string,
+  sigs: Set<string>,
+  samplePaths: string[],
+): ClassScore[] {
+  const t = template.toLowerCase()
+  const first = t.split('/').filter(Boolean)[0] || ''
+  const has = (s: string) => sigs.has(s)
+  const urlIs = (re: RegExp) => re.test(t)
+  const querySearch = samplePaths.some((p) => /\?(q|s|query|keyword|search)=/.test(p))
+
+  // Anchor gates — site-wide DOM signals (header/footer mentions of "cart",
+  // "checkout", "add to cart") leak into every cluster, so we only credit
+  // commerce classifications when the URL or structured data confirms the
+  // page's actual purpose. Without an anchor, the class is capped at 2 points.
+  const productAnchor =
+    has('jsonld:Product') || has('og:type=product') || urlIs(/\/(products?|p|item|dp|goods)\b/)
+  const categoryAnchor =
+    has('jsonld:Collection') ||
+    urlIs(/\/(collections?|categor|shop|c|catalog|department|tag|brand)\b/)
+  const cartAnchor = urlIs(/\/(cart|basket|bag|minicart)\b/)
+  const checkoutAnchor = urlIs(
+    /\/(checkout|order(s|-confirmation)?|thank-?you|receipt|complete)\b/,
+  )
+  const searchAnchor =
+    has('jsonld:SearchResults') || querySearch || urlIs(/\/search\b/)
+
+  const product = gate(
+    productAnchor,
+    addScore(
+      has('jsonld:Product') && { pts: 5, h: 'jsonld:Product' },
+      has('og:type=product') && { pts: 4, h: 'og:type=product' },
+      has('sku hint') && { pts: 2, h: 'sku hint' },
+      has('variant selector') && { pts: 2, h: 'variant selector' },
+      has('add-to-cart control') && { pts: 1, h: 'add-to-cart control' },
+      urlIs(/\/(products?|p|item|dp|goods)\b/) && { pts: 3, h: 'URL /' + first + '/' },
+      has('visible price') && { pts: 1, h: 'visible price' },
+    ),
+  )
+
+  const category = gate(
+    categoryAnchor,
+    addScore(
+      has('jsonld:Collection') && { pts: 5, h: 'jsonld:Collection' },
+      has('product grid') && { pts: 3, h: 'product grid layout' },
+      urlIs(/\/(collections?|categor|shop|c|catalog|department|tag|brand)\b/) && {
+        pts: 3,
+        h: 'URL /' + first + '/',
+      },
+      has('filter/sort controls') && { pts: 2, h: 'filter/sort controls' },
+      has('breadcrumb nav') && { pts: 1, h: 'breadcrumb nav' },
+    ),
+  )
+
+  const search = gate(
+    searchAnchor,
+    addScore(
+      has('jsonld:SearchResults') && { pts: 5, h: 'jsonld:SearchResults' },
+      querySearch && { pts: 4, h: 'query param q/s/keyword' },
+      urlIs(/\/search\b/) && { pts: 4, h: 'URL /search' },
+      has('search input') && { pts: 1, h: 'search input' },
+    ),
+  )
+
+  const cart = gate(
+    cartAnchor,
+    addScore(
+      urlIs(/\/(cart|basket|bag|minicart)\b/) && { pts: 5, h: 'URL /' + first + '/' },
+      has('cart form') && { pts: 3, h: 'cart form' },
+      has('cart line items') && { pts: 3, h: 'cart line items' },
+    ),
+  )
+
+  // Checkout is very strict — must have URL anchor, DOM "checkout" text is
+  // unreliable because headers/footers link to checkout from every page.
+  const checkout = gate(
+    checkoutAnchor,
+    addScore(
+      urlIs(/\/(checkout|order(s|-confirmation)?|thank-?you|receipt|complete)\b/) && {
+        pts: 5,
+        h: 'URL /' + first + '/',
+      },
+      has('checkout hint') && checkoutAnchor && { pts: 2, h: 'checkout DOM hint' },
+    ),
+  )
+
+  const content = addScore(
+    has('jsonld:Article') && { pts: 5, h: 'jsonld:Article' },
+    has('og:type=article') && { pts: 4, h: 'og:type=article' },
+    has('article tag') && { pts: 2, h: '<article> element' },
+    has('datetime meta') && { pts: 2, h: '<time datetime>' },
+    has('author byline') && { pts: 2, h: 'author byline' },
+  )
+
+  const home: ScoreBreakdown =
+    template === '/' ? { score: 10, hits: ['root path /'] } : { score: 0, hits: [] }
+
+  const all: ClassScore[] = [
+    { class: 'home', score: home.score, hits: home.hits },
+    { class: 'product', score: product.score, hits: product.hits },
+    { class: 'category', score: category.score, hits: category.hits },
+    { class: 'search', score: search.score, hits: search.hits },
+    { class: 'cart', score: cart.score, hits: cart.hits },
+    { class: 'checkout', score: checkout.score, hits: checkout.hits },
+    { class: 'content', score: content.score, hits: content.hits },
+  ]
+  all.sort((a, b) => b.score - a.score)
+  return all
+}
+
+function addScore(...items: (false | { pts: number; h: string })[]): ScoreBreakdown {
+  let score = 0
+  const hits: string[] = []
+  for (const it of items) {
+    if (!it) continue
+    score += it.pts
+    hits.push(it.h)
+  }
+  return { score, hits }
+}
+
+// Cap a class's score when the anchor gate is absent. Weak residual signals
+// still surface (e.g. a shared "add to cart" mention), but can never outrank
+// a properly-anchored classification.
+function gate(anchorPresent: boolean, s: ScoreBreakdown): ScoreBreakdown {
+  if (anchorPresent) return s
+  return { score: Math.min(s.score, 2), hits: s.hits }
+}
+
+function confidenceFromScore(
+  top: number,
+  runner: number,
+  spa: boolean,
+  signalCount: number,
+): 'high' | 'medium' | 'low' {
+  if (spa && signalCount < 3) return 'low'
+  if (top >= 7 && top - runner >= 3) return 'high'
+  if (top >= 4) return 'medium'
+  return 'low'
+}
+
+function reasonForConfidence(
+  c: 'high' | 'medium' | 'low',
+  top: ClassScore,
+  runner: ClassScore | undefined,
+  spa: boolean,
+): string {
+  if (spa) return 'Client-rendered shell — DOM signals sparse; confidence capped.'
+  if (c === 'high')
+    return (
+      'Top score ' +
+      top.score +
+      ' clearly exceeds runner-up ' +
+      (runner?.score ?? 0) +
+      '; multiple independent signals agree.'
+    )
+  if (c === 'medium')
+    return (
+      'Score ' +
+      top.score +
+      ' passes classification threshold but runner-up ' +
+      humanClassName(runner?.class ?? 'other') +
+      ' at ' +
+      (runner?.score ?? 0) +
+      ' is close — review before locking.'
+    )
+  return 'No strong signal combination — cluster fell back to generic/other.'
+}
+
+function consultantActionFor(
+  c: Classification,
+  conf: 'high' | 'medium' | 'low',
+  runner: ClassScore | undefined,
+): string {
+  if (c === 'other' || conf === 'low')
+    return 'Review sampled URLs and rename or merge with a more specific page type.'
+  if (conf === 'medium' && runner)
+    return 'Confirm this is ' + humanClassName(c) + ' and not ' + humanClassName(runner.class) + '.'
+  return 'Confirm the name and isMatch expression, then lock.'
+}
+
+function classificationSource(c: Classification): Evidence['source'] {
+  if (c === 'home') return 'UrlPattern'
+  if (c === 'content') return 'StructuredData'
+  return 'DomSignal'
+}
+
+function humanClassName(c: Classification): string {
+  switch (c) {
+    case 'home':
+      return 'Home'
+    case 'product':
+      return 'Product Detail'
+    case 'category':
+      return 'Category'
+    case 'search':
+      return 'Search Results'
+    case 'cart':
+      return 'Cart'
+    case 'checkout':
+      return 'Checkout / Order'
+    case 'content':
+      return 'Content / Article'
+    case 'other':
+      return 'Other'
+  }
+}
+
+function scoreDetail(c: Classification, s: ClassScore): string {
+  if (s.hits.length === 0) return 'No class-specific signals observed.'
+  return humanClassName(c) + ' signals: ' + s.hits.join(' + ')
+}
+
+function upsertEvent(events: EventDraft[], draft: EventDraft): void {
+  const existing = events.find((e) => e.id === draft.id)
+  if (!existing) {
+    events.push(draft)
+    return
+  }
+  for (const ref of draft.pageTypeRefs) {
+    if (!existing.pageTypeRefs.includes(ref)) existing.pageTypeRefs.push(ref)
+  }
+}
+
+// ——— clustering ———
 
 function clusterSamples(samples: RawSample[]): Cluster[] {
   const map = new Map<string, Cluster>()
@@ -156,8 +479,9 @@ function clusterSamples(samples: RawSample[]): Cluster[] {
 }
 
 function pathTemplate(path: string): string {
-  if (path === '/') return '/'
-  const segs = path.split('/').filter(Boolean)
+  const clean = path.split('?')[0]
+  if (clean === '/') return '/'
+  const segs = clean.split('/').filter(Boolean)
   return (
     '/' +
     segs
@@ -171,38 +495,17 @@ function pathTemplate(path: string): string {
   )
 }
 
-function classify(template: string, signals: Set<string>): Classification {
-  if (template === '/') return 'home'
-  const t = template.toLowerCase()
-  if (/\bcart\b/.test(t)) return 'cart'
-  if (/\bsearch\b/.test(t)) return 'search'
-  if (
-    signals.has('Product JSON-LD') ||
-    signals.has('og:type product') ||
-    /\/(products?|p|item)\b/.test(t)
-  ) {
-    return 'product'
-  }
-  if (
-    signals.has('Collection JSON-LD') ||
-    /\/(collections?|categor|shop|c|catalog)\b/.test(t)
-  ) {
-    return 'category'
-  }
-  return 'other'
-}
-
 function nameFor(template: string, cls: Classification, first: RawSample): string {
   if (cls === 'home') return 'Home'
   if (cls === 'product') return 'Product Detail'
   if (cls === 'category') return 'Category'
   if (cls === 'cart') return 'Cart'
   if (cls === 'search') return 'Search Results'
+  if (cls === 'checkout') return 'Checkout / Order'
+  if (cls === 'content') return 'Article'
   const segs = template.split('/').filter(Boolean).filter((s) => !s.startsWith(':'))
   if (segs.length > 0) {
-    return segs[0]
-      .replace(/[-_]/g, ' ')
-      .replace(/\b\w/g, (c) => c.toUpperCase())
+    return segs[0].replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
   }
   return first.title?.slice(0, 40) || 'Untitled'
 }
