@@ -1,4 +1,5 @@
 import type {
+  AttributeCandidate,
   DataObjectDraft,
   EventDraft,
   Evidence,
@@ -18,6 +19,12 @@ interface Intent {
     | 'view_cart'
     | 'track_content'
     | 'enrich_profile'
+    | 'attribute_language'
+    | 'attribute_market'
+    | 'attribute_login'
+    | 'attribute_customer_type'
+    | 'attribute_affinity'
+    | 'attribute_consent'
     | 'exclude'
     | 'generic_track'
   interaction?:
@@ -29,6 +36,8 @@ interface Intent {
     | 'ViewCart'
   objectTypes: Array<'Product' | 'Category' | 'Cart' | 'Order' | 'Search'>
   pageClassHint?: 'product' | 'category' | 'search' | 'cart' | 'checkout' | 'content' | 'home'
+  attributeBinding?: string // attribute name, e.g. 'language'
+  mayCreateEvent?: boolean // if true and no event matches, synthesize a candidate
 }
 
 interface ParsedClause {
@@ -42,78 +51,118 @@ interface ParsedClause {
 
 // Intent templates — ordered; longer/more specific first so we don't let a
 // generic "view" swallow "view product detail".
+//
+// Templates are deliberately patterned on consultant-style phrasing rather
+// than single keywords. "track product detail views", "capture product
+// impressions", "understand how users browse categories" all map to the
+// right intent without requiring exact wording.
 const TEMPLATES: Array<{ pattern: RegExp; intent: Intent }> = [
+  // ——— page/event intents ———
   {
-    pattern: /\b(product\s*detail|product\s*page|pdp|view\s*(a\s*)?product|product\s*view|view\s*item)\b/,
+    pattern:
+      /\b(product\s*(detail|page|view|impression)|pdp|view\s*(a\s*)?product|product\s*view|view\s*item|browse\s*products?)\b/,
     intent: {
       id: 'view_product',
       interaction: 'ViewCatalogObject',
       objectTypes: ['Product'],
       pageClassHint: 'product',
+      mayCreateEvent: true,
     },
   },
   {
-    pattern: /\b(category|collection|listing|plp)\s*(page|view)?s?\b/,
+    pattern:
+      /\b(categor(y|ies)|collection|listing|plp|browse\s*categor(y|ies)|category\s*(view|page|impression))\b/,
     intent: {
       id: 'view_category',
       interaction: 'ViewCategory',
       objectTypes: ['Category'],
       pageClassHint: 'category',
+      mayCreateEvent: true,
     },
   },
   {
-    pattern: /\bsearch(\s*(result|usage|query|page))?\b/,
+    pattern:
+      /\b(search(\s*(result|usage|query|page|term|keyword))?|on[\s-]?site\s*search|site\s*search)\b/,
     intent: {
       id: 'view_search',
       interaction: 'ViewSearch',
       objectTypes: [],
       pageClassHint: 'search',
+      mayCreateEvent: true,
     },
   },
   {
-    pattern: /\badd[\s-]?to[\s-]?cart\b|\badd\s+item(s)?\s+to\s+(the\s+)?cart\b/,
+    pattern:
+      /\badd[\s-]?to[\s-]?cart\b|\badd\s+item(s)?\s+to\s+(the\s+)?cart\b|\bput\s+in\s+(the\s+)?cart\b/,
     intent: {
       id: 'add_to_cart',
       interaction: 'AddToCart',
       objectTypes: ['Cart', 'Product'],
       pageClassHint: 'product',
+      mayCreateEvent: true,
     },
   },
   {
-    pattern: /\b(purchase|checkout\s*complete|order\s*(complete|confirmation)|transaction|order\s*placed)\b/,
+    pattern:
+      /\b(purchase|checkout\s*(complete|start|intent)?|order\s*(complete|confirmation|placed)?|transaction|conversion)\b/,
     intent: {
       id: 'purchase',
       interaction: 'Purchase',
       objectTypes: ['Order'],
       pageClassHint: 'checkout',
+      mayCreateEvent: true,
     },
   },
   {
-    pattern: /\b(cart\s*(state|view|page)|view\s*(the\s*)?cart|basket)\b/,
+    pattern: /\b(cart\s*(state|view|page|value)|view\s*(the\s*)?cart|basket)\b/,
     intent: {
       id: 'view_cart',
       interaction: 'ViewCart',
       objectTypes: ['Cart'],
       pageClassHint: 'cart',
+      mayCreateEvent: true,
     },
   },
   {
-    pattern: /\b(article|blog|story|content)\s*(view|page|read)?s?\b/,
-    intent: {
-      id: 'track_content',
-      objectTypes: [],
-      pageClassHint: 'content',
-    },
+    pattern: /\b(article|blog|story|content)\s*(view|page|read|impression)?s?\b/,
+    intent: { id: 'track_content', objectTypes: [], pageClassHint: 'content' },
+  },
+  // ——— attribute intents ———
+  {
+    pattern: /\b(language|ui\s*language|html\s*lang|display\s*language|locale)\b/,
+    intent: { id: 'attribute_language', objectTypes: [], attributeBinding: 'language' },
   },
   {
-    pattern: /\b(enrich|capture|update).*(profile|user|visitor|attribute|affinity|language|market|login\s*status)\b/,
+    pattern: /\b(market|country|region|store\s*locale)\b/,
+    intent: { id: 'attribute_market', objectTypes: [], attributeBinding: 'market' },
+  },
+  {
+    pattern: /\b(login\s*status|authenticated|known\s*vs\s*anonymous|logged[\s-]?in|sign[\s-]?in\s*state)\b/,
+    intent: { id: 'attribute_login', objectTypes: [], attributeBinding: 'loginStatus' },
+  },
+  {
+    pattern: /\b(customer\s*(tier|type|segment)|member|subscriber|loyalty|b2[bc]|vip)\b/,
+    intent: { id: 'attribute_customer_type', objectTypes: [], attributeBinding: 'customerType' },
+  },
+  {
+    pattern:
+      /\b(affinity|preference|interest|category\s*affinity|brand\s*affinity|product\s*affinity|browse\s*affinity)\b/,
+    intent: { id: 'attribute_affinity', objectTypes: [], attributeBinding: 'productAffinity' },
+  },
+  {
+    pattern: /\b(consent|opt[\s-]?in|opt[\s-]?out|gdpr|ccpa|privacy\s*preference)\b/,
+    intent: { id: 'attribute_consent', objectTypes: [], attributeBinding: 'consentStatus' },
+  },
+  {
+    pattern: /\b(enrich|capture|update).*(profile|user|visitor|attribute)\b/,
     intent: { id: 'enrich_profile', objectTypes: [] },
   },
 ]
 
 const EXCLUSION_RE =
-  /\b(do\s*not|don'?t|never|avoid|exclude|without)\b|\bno\s+(cart|commerce|purchase|product)/
-const CONDITIONAL_RE = /\b(if\s+detectable|if\s+possible|where\s+possible|otherwise|when\s+available)\b/
+  /\b(do\s*not|don'?t|never|avoid|exclude|without)\b|\bno\s+(cart|commerce|purchase|product|sensitive)/
+const CONDITIONAL_RE =
+  /\b(if\s+(detectable|possible|available)|where\s+possible|otherwise|when\s+available|if\s+they)\b/
 const LIMIT_RE = /\b(only|solely|exclusively)\b/
 
 export function parseRequirements(
@@ -121,15 +170,18 @@ export function parseRequirements(
   pageTypes: PageTypeDraft[],
   dataObjects: DataObjectDraft[],
   events: EventDraft[],
+  attributes: AttributeCandidate[],
 ): {
   mappings: RequirementMapping[]
   pending: PendingConfirmation[]
   evidence: Evidence[]
+  newEvents: EventDraft[]
 } {
   const mappings: RequirementMapping[] = []
   const pending: PendingConfirmation[] = []
   const evidence: Evidence[] = []
-  if (!rawText.trim()) return { mappings, pending, evidence }
+  const newEvents: EventDraft[] = []
+  if (!rawText.trim()) return { mappings, pending, evidence, newEvents }
 
   const clauses = splitClauses(rawText).map(parseClause)
 
@@ -172,7 +224,7 @@ export function parseRequirements(
         question:
           'Could not auto-map requirement: "' +
           truncate(clause.original, 80) +
-          '". Assign it to a page type, object, or event manually.',
+          '". Assign it to a page type, object, attribute, or event manually.',
       })
       evidence.push({
         id: 'ev_req_unmapped_' + id,
@@ -180,7 +232,8 @@ export function parseRequirements(
         source: 'RequirementText',
         label: 'Unmapped: ' + clause.original.slice(0, 50),
         detail: 'No intent template matched this clause',
-        confidenceReason: 'None of the product/category/search/cart/purchase/content templates fired',
+        confidenceReason:
+          'None of the product/category/search/cart/purchase/content/attribute templates fired',
         consultantAction: 'Rephrase or manually assign this requirement',
       })
       return
@@ -189,14 +242,62 @@ export function parseRequirements(
     for (const { intent, matchedPhrase } of matchedIntents) {
       matchedHits.push(matchedPhrase)
 
-      // Try to bind to an existing page type via hint
+      // Attribute-type intent → bind to attribute candidate
+      if (intent.attributeBinding) {
+        let attr = attributes.find((a) => a.name === intent.attributeBinding)
+        if (!attr) {
+          // Create a low-confidence requirement-driven candidate on the fly
+          attr = {
+            id: 'attr_req_' + intent.attributeBinding + '_' + rand(),
+            name: intent.attributeBinding,
+            category:
+              intent.id === 'attribute_language' || intent.id === 'attribute_market'
+                ? 'Locale'
+                : intent.id === 'attribute_login'
+                ? 'Identity'
+                : intent.id === 'attribute_customer_type'
+                ? 'CustomerType'
+                : intent.id === 'attribute_affinity'
+                ? 'Affinity'
+                : intent.id === 'attribute_consent'
+                ? 'Consent'
+                : 'Other',
+            proposedSource: 'requirement text',
+            detectionHint: 'derive from runtime signal',
+            confidence: 'low',
+            confidenceReason:
+              'Requested by the requirement but no crawl-time DOM signal corroborated it',
+            sensitive: false,
+            status: 'needsConfirmation',
+            consultantAction:
+              'Confirm the runtime source and whether this should be tracked in sitemap vs. derived downstream',
+            fromRequirement: true,
+            evidenceRefs: [],
+          }
+          attributes.push(attr)
+        }
+        targets.push({ attributeRef: attr.id })
+        continue
+      }
+
       const candidatePt = intent.pageClassHint
         ? pageTypes.find((pt) => classHintMatchesPT(intent.pageClassHint!, pt))
         : undefined
 
-      // Event target
+      // Event target — bind or synthesize
       if (intent.interaction) {
-        const ev = events.find((e) => e.interactionName === intent.interaction)
+        let ev = events.find((e) => e.interactionName === intent.interaction)
+        if (!ev && intent.mayCreateEvent && candidatePt) {
+          ev = {
+            id: 'ev_' + intent.interaction!.toLowerCase() + '_' + rand(),
+            kind: 'interaction',
+            interactionName: intent.interaction,
+            pageTypeRefs: [candidatePt.id],
+            triggerHint: defaultTriggerFor(intent.interaction),
+          }
+          events.push(ev)
+          newEvents.push(ev)
+        }
         if (ev) {
           targets.push({
             eventRef: ev.id,
@@ -227,6 +328,7 @@ export function parseRequirements(
     else if (clause.conditional || clause.limiter) status = 'needsConfirmation'
     else if (
       unique.some((t) => t.eventRef) ||
+      unique.some((t) => t.attributeRef) ||
       unique.some((t) => t.objectRef && t.pageTypeRef) ||
       unique.length >= 2
     )
@@ -252,9 +354,9 @@ export function parseRequirements(
       matched: matchedHits,
       confidenceReason:
         status === 'mapped'
-          ? 'Intent template matched and a concrete event/object target was available'
+          ? 'Intent template matched and a concrete target (event / attribute / object) was bound'
           : clause.conditional
-          ? 'Clause contains a conditional ("if detectable"/"otherwise") — needs consultant confirmation'
+          ? 'Clause contains a conditional — needs consultant confirmation before locking'
           : clause.limiter
           ? 'Clause contains a limiter ("only"/"exclusively") — confirm scope before locking'
           : 'Intent matched but no concrete target could be bound — weak mapping',
@@ -282,17 +384,33 @@ export function parseRequirements(
     }
   })
 
-  return { mappings, pending, evidence }
+  return { mappings, pending, evidence, newEvents }
+}
+
+function defaultTriggerFor(name: string): string {
+  switch (name) {
+    case 'ViewCatalogObject':
+      return 'fires on product detail page load'
+    case 'ViewCategory':
+      return 'fires on category page load'
+    case 'ViewSearch':
+      return 'fires on search results page load (bind to query param)'
+    case 'ViewCart':
+      return 'fires on cart page load'
+    case 'AddToCart':
+      return 'click on add-to-cart control'
+    case 'Purchase':
+      return 'order confirmation page load'
+    default:
+      return 'to be confirmed'
+  }
 }
 
 function splitClauses(text: string): string[] {
-  // First pass: sentences on strong terminators.
   const sentences = text
     .split(/(?<=[.!?。！？])\s+|[\n;；]+/)
     .map((s) => s.trim())
     .filter(Boolean)
-  // Second pass: split compound sentences on ", but " / " but " so that
-  // an exclusion sub-clause doesn't nullify the positive sub-clause.
   const out: string[] = []
   for (const s of sentences) {
     const parts = s.split(/\s*,?\s+but\s+(?=do\s*not|don'?t|never|avoid|exclude)/i)
@@ -320,7 +438,7 @@ function parseClause(original: string): ParsedClause {
 function classHintMatchesPT(hint: string, pt: PageTypeDraft): boolean {
   const n = pt.name.toLowerCase()
   if (hint === 'product') return /product/.test(n)
-  if (hint === 'category') return /(category|collection)/.test(n)
+  if (hint === 'category') return /(category|collection|tag)/.test(n)
   if (hint === 'search') return /search/.test(n)
   if (hint === 'cart') return /cart|basket/.test(n)
   if (hint === 'checkout') return /(checkout|order)/.test(n)
@@ -337,7 +455,14 @@ function dedupe(targets: RequirementMappingTarget[]): RequirementMappingTarget[]
   const seen = new Set<string>()
   const out: RequirementMappingTarget[] = []
   for (const t of targets) {
-    const k = (t.pageTypeRef || '') + '|' + (t.objectRef || '') + '|' + (t.eventRef || '')
+    const k =
+      (t.pageTypeRef || '') +
+      '|' +
+      (t.objectRef || '') +
+      '|' +
+      (t.eventRef || '') +
+      '|' +
+      (t.attributeRef || '')
     if (seen.has(k)) continue
     seen.add(k)
     out.push(t)

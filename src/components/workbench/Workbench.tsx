@@ -47,11 +47,73 @@ export function Workbench() {
         </div>
       </header>
 
-      <main className="flex-1 max-w-screen-2xl w-full mx-auto px-6 py-6 grid gap-4 grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)_320px]">
-        <PageTypeList />
-        <PageTypeEditor pageType={selected} />
-        <EvidencePane pageType={selected} />
+      <main className="flex-1 max-w-screen-2xl w-full mx-auto px-6 py-6 flex flex-col gap-4">
+        <div className="grid gap-4 grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)_320px]">
+          <PageTypeList />
+          <PageTypeEditor pageType={selected} />
+          <EvidencePane pageType={selected} />
+        </div>
+        <AttributesStrip />
       </main>
     </div>
+  )
+}
+
+function AttributesStrip() {
+  const { state } = useAnalysisStore()
+  const attrs = state.analysis?.attributes ?? []
+  if (attrs.length === 0) {
+    return (
+      <section className="border border-gray-800 rounded bg-gray-900/40 p-4 text-xs text-gray-500">
+        <div className="text-gray-300 text-sm font-medium mb-1">User Attributes</div>
+        No attribute candidates detected. Personalization targeting will rely on page type alone until attributes are added manually.
+      </section>
+    )
+  }
+  const confColor: Record<string, string> = {
+    high: 'text-emerald-300 border-emerald-700/50',
+    medium: 'text-amber-300 border-amber-700/50',
+    low: 'text-gray-400 border-gray-700',
+  }
+  return (
+    <section className="border border-gray-800 rounded bg-gray-900/40 p-4">
+      <div className="flex items-baseline justify-between mb-3">
+        <div className="text-gray-200 text-sm font-medium">User Attribute Candidates</div>
+        <div className="text-[11px] text-gray-500">
+          {attrs.length} detected · confirm sources before locking
+        </div>
+      </div>
+      <ul className="grid gap-2 md:grid-cols-2 lg:grid-cols-3">
+        {attrs.map((a) => (
+          <li
+            key={a.id}
+            className={
+              'border rounded px-3 py-2 text-xs bg-gray-950/60 ' +
+              (a.status === 'excluded'
+                ? 'border-red-900/50 text-red-300'
+                : 'border-gray-800 text-gray-300')
+            }
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-medium text-gray-100">
+                {a.name}
+                <span className="ml-1 text-[10px] text-gray-500">({a.category})</span>
+              </span>
+              <span
+                className={
+                  'text-[10px] uppercase border rounded px-1.5 py-0.5 ' +
+                  (confColor[a.confidence] ?? 'text-gray-400 border-gray-700')
+                }
+              >
+                {a.status === 'excluded' ? 'excluded' : a.confidence}
+              </span>
+            </div>
+            <div className="mt-1 text-gray-500">source: {a.proposedSource}</div>
+            <div className="mt-1 text-gray-500">{a.confidenceReason}</div>
+            <div className="mt-1 text-amber-200/80">→ {a.consultantAction}</div>
+          </li>
+        ))}
+      </ul>
+    </section>
   )
 }

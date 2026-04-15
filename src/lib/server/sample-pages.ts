@@ -56,9 +56,21 @@ export async function samplePages(entryUrl: string, maxPages = 8): Promise<RawSa
 // Structured list of signal tokens. Each token is stable so the synthesize
 // layer can score against it without regex-in-regex. Tokens are human-readable
 // because they flow directly into Evidence.matched.
+//
+// Signal grammar is intentionally language-agnostic where possible. Where we
+// need text matching (add-to-cart, price), we match an English pattern AND a
+// Japanese pattern so non-English brand sites don't fall back to URL-only.
 export function collectSignals(html: string): string[] {
   const signals = new Set<string>()
   const add = (s: string) => signals.add(s)
+
+  // ——— Language / locale meta (language-neutral, flows into attributes) ———
+  const htmlLang = html.match(/<html[^>]*\blang=["']([^"']+)["']/i)
+  if (htmlLang) add('html:lang=' + htmlLang[1].toLowerCase())
+  const hreflangs = Array.from(html.matchAll(/<link[^>]+rel=["']alternate["'][^>]+hreflang=["']([^"']+)["']/gi))
+  if (hreflangs.length > 0) add('hreflang:' + hreflangs.length)
+  const canonical = html.match(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i)
+  if (canonical) add('canonical present')
 
   // Structured data
   if (/application\/ld\+json[^>]*>[\s\S]*?"@type"\s*:\s*"Product"/i.test(html)) add('jsonld:Product')
@@ -76,12 +88,21 @@ export function collectSignals(html: string): string[] {
   if (/\bog:type[^>]*content=["']article["']/i.test(html)) add('og:type=article')
   if (/itemprop=["']sku["']|data-sku=|"sku"\s*:/i.test(html)) add('sku hint')
 
-  // Commerce DOM
-  if (/add[-_\s]?to[-_\s]?cart/i.test(html)) add('add-to-cart control')
+  // Commerce DOM — English + Japanese variants
+  if (/add[-_\s]?to[-_\s]?cart|addtocart/i.test(html)) add('add-to-cart control')
+  // JA: カートに入れる / カートへ / 買い物かごに入れる / 購入する
+  if (/カートに入れる|カートへ|買い物かごに入れる|購入する|今すぐ購入/.test(html))
+    add('add-to-cart control (JA)')
   if (/<form[^>]*action=[^>]*\/cart/i.test(html)) add('cart form')
-  if (/variant|swatch|size-selector|option-selector/i.test(html)) add('variant selector')
+  if (/variant|swatch|size-selector|option-selector|color-swatch/i.test(html)) add('variant selector')
+  // JA: サイズ / カラー / 在庫 / 品番
+  if (/サイズ選択|カラー選択|サイズ・カラー|在庫|品番|SKU/.test(html)) add('variant selector (JA)')
   if (/cart-(subtotal|total|count)|line-item|cart__line/i.test(html)) add('cart line items')
+  if (/小計|合計|数量|カートの中|カート商品/.test(html)) add('cart line items (JA)')
   if (/checkout|order-summary|order-confirmation|thank[\s-]?you/i.test(html)) add('checkout hint')
+  if (/ご注文|お支払い|ご購入手続|注文完了|注文確認/.test(html)) add('checkout hint (JA)')
+  if (/ログイン|会員登録|マイアカウント|お気に入り/.test(html)) add('account/identity hint (JA)')
+  if (/login|sign[\s-]?in|my[\s-]?account|wishlist|favorites/i.test(html)) add('account/identity hint')
 
   // Category/listing
   if (
@@ -96,6 +117,7 @@ export function collectSignals(html: string): string[] {
   // Search
   if (/<input[^>]*(type=["']search["']|name=["'](q|s|query|keyword)["'])/i.test(html))
     add('search input')
+  if (/検索|サイト内検索|キーワード/.test(html)) add('search input (JA)')
 
   // Content
   if (/<article\b/i.test(html)) add('article tag')
@@ -107,8 +129,22 @@ export function collectSignals(html: string): string[] {
   if (/gtm\.start|googletagmanager\.com/i.test(html)) add('GTM container')
 
   // Pricing — weak signal, but contributes
-  if (/class=["'][^"']*\bprice\b[^"']*["']|itemprop=["']price["']|\$\s?\d|¥\s?\d|€\s?\d/.test(html))
+  if (/class=["'][^"']*\bprice\b[^"']*["']|itemprop=["']price["']|\$\s?\d|¥\s?\d|€\s?\d|￥\s?\d/.test(html))
     add('visible price')
+  if (/税込|税抜|円$|[0-9,]+\s?円/m.test(html)) add('visible price (JA)')
+
+  // Consent / privacy
+  if (/cookie[\s-]?consent|gdpr|ccpa|onetrust|trustarc|cookielaw|privacy[\s-]?preferences/i.test(html))
+    add('consent banner')
+  if (/クッキー|プライバシー設定/.test(html)) add('consent banner (JA)')
+
+  // Weak-PDP leaf signals — combined later in scoring
+  if (/<(div|section)[^>]*class=["'][^"']*(product-(gallery|images|media)|gallery|image-slider|carousel-product)/i.test(html))
+    add('product gallery')
+  if (/<(div|section)[^>]*class=["'][^"']*(product-(specs|details|info)|spec-table|product-attributes)/i.test(html))
+    add('product spec block')
+  if (/in\s?stock|out\s?of\s?stock|available|sold\s?out/i.test(html)) add('stock state')
+  if (/在庫あり|在庫なし|入荷待ち|売り切れ|完売/.test(html)) add('stock state (JA)')
 
   // Title signal
   const h1 = html.match(/<h1[^>]*>([^<]{2,120})<\/h1>/i)

@@ -133,6 +133,7 @@ export function buildMockAnalysis(
         status: 'mapped',
       },
     ],
+    attributes: [],
     assumptions: [
       'Shopify theme with default /products/* and /collections/* routing',
       'Product JSON-LD is rendered server-side on every PDP',

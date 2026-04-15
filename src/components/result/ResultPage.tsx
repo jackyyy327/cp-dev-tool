@@ -274,6 +274,27 @@ function NotesTab() {
           ))}
         </ul>
       </Card>
+      <Card size="sm" className="bg-gray-900 border-gray-800 px-5 lg:col-span-2">
+        <h2 className="text-xs uppercase tracking-wide text-gray-500 font-medium">
+          User Attribute Candidates
+        </h2>
+        {analysis.attributes.length === 0 ? (
+          <p className="text-xs text-gray-500">
+            No attribute candidates detected. Targeting will rely on page type alone until attributes are added manually.
+          </p>
+        ) : (
+          <ul className="space-y-1.5 text-xs text-gray-400 list-disc pl-4">
+            {analysis.attributes.map((a) => (
+              <li key={a.id}>
+                <span className="text-gray-200 font-medium">{a.name}</span>{' '}
+                <span className="text-gray-500">({a.category} · {a.status === 'excluded' ? 'excluded' : a.confidence})</span>
+                {' — '}
+                {a.proposedSource}. {a.consultantAction}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
     </div>
   )
 }

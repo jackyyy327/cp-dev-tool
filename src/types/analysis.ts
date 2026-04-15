@@ -96,6 +96,8 @@ export type EvidenceSource =
   | 'Metadata'
   | 'RequirementText'
   | 'SampleCoverage'
+  | 'LanguageSignal'
+  | 'AttributeHint'
 
 export interface Evidence {
   id: string
@@ -124,6 +126,32 @@ export interface RequirementMappingTarget {
   pageTypeRef?: string
   objectRef?: string
   eventRef?: string
+  attributeRef?: string
+}
+
+export type AttributeCategory =
+  | 'Locale'
+  | 'Identity'
+  | 'CustomerType'
+  | 'Affinity'
+  | 'Consent'
+  | 'Other'
+
+export type AttributeStatus = 'suggested' | 'needsConfirmation' | 'excluded'
+
+export interface AttributeCandidate {
+  id: string
+  name: string // consultant-facing label, e.g. "language", "loginStatus"
+  category: AttributeCategory
+  proposedSource: string // e.g. 'html[lang]', 'url /jp/', 'account nav', 'requirement text'
+  detectionHint: string // how the analyzer would read it
+  confidence: Confidence
+  confidenceReason: string
+  sensitive: boolean // true → consultant should confirm or exclude
+  status: AttributeStatus
+  consultantAction: string
+  fromRequirement: boolean // true when driven by a requirement clause rather than crawl
+  evidenceRefs: string[]
 }
 
 export interface RequirementMapping {
@@ -165,6 +193,7 @@ export interface AnalysisResult {
   pageTypes: PageTypeDraft[]
   dataObjects: DataObjectDraft[]
   events: EventDraft[]
+  attributes: AttributeCandidate[]
   evidence: Evidence[]
   assumptions: string[]
   pendingConfirmations: PendingConfirmation[]

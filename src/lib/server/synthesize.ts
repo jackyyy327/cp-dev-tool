@@ -257,8 +257,34 @@ function scoreClasses(
   // "checkout", "add to cart") leak into every cluster, so we only credit
   // commerce classifications when the URL or structured data confirms the
   // page's actual purpose. Without an anchor, the class is capped at 2 points.
+  //
+  // Weak-structure PDP exception: a leaf slug path (single segment, no query)
+  // with the combined signal set of a terminal product page can raise an
+  // anchor. This catches brand sites that use slug-only URLs like
+  // /baggies.html or /tree-runner without a /products/ prefix.
+  const leafSegs = t === '/' ? [] : t.split('/').filter(Boolean)
+  const isLeaf = leafSegs.length >= 1 && leafSegs.length <= 2 && !t.endsWith('/')
+  const hasProductCombo =
+    [
+      has('product gallery'),
+      has('product spec block'),
+      has('variant selector'),
+      has('variant selector (JA)'),
+      has('add-to-cart control'),
+      has('add-to-cart control (JA)'),
+      has('stock state'),
+      has('stock state (JA)'),
+      has('sku hint'),
+      has('visible price'),
+      has('visible price (JA)'),
+    ].filter(Boolean).length >= 3
+  const hasTerminalBreadcrumb = has('breadcrumb nav') || has('jsonld:Breadcrumb')
+  const weakProductAnchor = isLeaf && hasProductCombo && hasTerminalBreadcrumb
   const productAnchor =
-    has('jsonld:Product') || has('og:type=product') || urlIs(/\/(products?|p|item|dp|goods)\b/)
+    has('jsonld:Product') ||
+    has('og:type=product') ||
+    urlIs(/\/(products?|p|item|dp|goods|商品|shouhin)\b/) ||
+    weakProductAnchor
   const categoryAnchor =
     has('jsonld:Collection') ||
     urlIs(/\/(collections?|categor|shop|c|catalog|department|tag|brand)\b/)
@@ -275,10 +301,17 @@ function scoreClasses(
       has('jsonld:Product') && { pts: 5, h: 'jsonld:Product' },
       has('og:type=product') && { pts: 4, h: 'og:type=product' },
       has('sku hint') && { pts: 2, h: 'sku hint' },
-      has('variant selector') && { pts: 2, h: 'variant selector' },
-      has('add-to-cart control') && { pts: 1, h: 'add-to-cart control' },
+      (has('variant selector') || has('variant selector (JA)')) && { pts: 2, h: 'variant selector' },
+      (has('add-to-cart control') || has('add-to-cart control (JA)')) && {
+        pts: 1,
+        h: 'add-to-cart control',
+      },
       urlIs(/\/(products?|p|item|dp|goods)\b/) && { pts: 3, h: 'URL /' + first + '/' },
-      has('visible price') && { pts: 1, h: 'visible price' },
+      (has('visible price') || has('visible price (JA)')) && { pts: 1, h: 'visible price' },
+      has('product gallery') && { pts: 2, h: 'product gallery' },
+      has('product spec block') && { pts: 2, h: 'product spec block' },
+      (has('stock state') || has('stock state (JA)')) && { pts: 1, h: 'stock state' },
+      weakProductAnchor && { pts: 2, h: 'weak-structure PDP combo (gallery + specs + breadcrumb)' },
     ),
   )
 
@@ -302,7 +335,7 @@ function scoreClasses(
       has('jsonld:SearchResults') && { pts: 5, h: 'jsonld:SearchResults' },
       querySearch && { pts: 4, h: 'query param q/s/keyword' },
       urlIs(/\/search\b/) && { pts: 4, h: 'URL /search' },
-      has('search input') && { pts: 1, h: 'search input' },
+      (has('search input') || has('search input (JA)')) && { pts: 1, h: 'search input' },
     ),
   )
 
@@ -311,7 +344,7 @@ function scoreClasses(
     addScore(
       urlIs(/\/(cart|basket|bag|minicart)\b/) && { pts: 5, h: 'URL /' + first + '/' },
       has('cart form') && { pts: 3, h: 'cart form' },
-      has('cart line items') && { pts: 3, h: 'cart line items' },
+      (has('cart line items') || has('cart line items (JA)')) && { pts: 3, h: 'cart line items' },
     ),
   )
 
@@ -324,7 +357,10 @@ function scoreClasses(
         pts: 5,
         h: 'URL /' + first + '/',
       },
-      has('checkout hint') && checkoutAnchor && { pts: 2, h: 'checkout DOM hint' },
+      (has('checkout hint') || has('checkout hint (JA)')) && checkoutAnchor && {
+        pts: 2,
+        h: 'checkout DOM hint',
+      },
     ),
   )
 

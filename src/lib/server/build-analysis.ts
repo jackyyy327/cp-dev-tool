@@ -3,6 +3,7 @@ import { detectPlatform, fetchPage, FetchError } from './fetch-site'
 import { samplePages } from './sample-pages'
 import { synthesize } from './synthesize'
 import { parseRequirements } from './parse-requirements'
+import { detectAttributes } from './detect-attributes'
 
 export async function buildAnalysis(
   siteUrl: string,
@@ -21,11 +22,17 @@ export async function buildAnalysis(
   }
 
   const { pageTypes, dataObjects, events, evidence } = synthesize(samples)
+  const { attributes, evidence: attrEvidence } = detectAttributes({
+    samples,
+    siteUrl: normalized,
+    requirementText: requirement.rawText,
+  })
+  for (const ae of attrEvidence) evidence.push(ae)
   const {
     mappings,
     pending,
     evidence: reqEvidence,
-  } = parseRequirements(requirement.rawText, pageTypes, dataObjects, events)
+  } = parseRequirements(requirement.rawText, pageTypes, dataObjects, events, attributes)
 
   // Attach requirement evidence to the page types it touches
   for (const rm of mappings) {
@@ -67,6 +74,11 @@ export async function buildAnalysis(
   if (requirement.constraints) {
     assumptions.push('User constraint applied: ' + requirement.constraints)
   }
+  if (attributes.length === 0) {
+    assumptions.push('No user attributes were detected — personalization targeting will rely on page type only until attributes are added manually.')
+  } else if (attributes.every((a) => a.confidence === 'low')) {
+    assumptions.push('All detected attributes are low-confidence — confirm their runtime sources before locking the sitemap.')
+  }
   if (pageTypes.every((pt) => pt.confidence !== 'high')) {
     assumptions.push('No high-confidence page type was detected — expect meaningful manual refinement.')
   }
@@ -90,6 +102,7 @@ export async function buildAnalysis(
     pageTypes,
     dataObjects,
     events,
+    attributes,
     evidence,
     assumptions,
     pendingConfirmations: pending,
