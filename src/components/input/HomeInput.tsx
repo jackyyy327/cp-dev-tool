@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { useAnalysisStore } from '@/lib/analysis-store'
-import { Sparkles } from 'lucide-react'
+import { Sparkles, Wand2, Loader2 } from 'lucide-react'
 
 export function HomeInput() {
   const { actions } = useAnalysisStore()
@@ -12,6 +12,41 @@ export function HomeInput() {
   const [requirements, setRequirements] = useState('')
   const [constraints, setConstraints] = useState('')
   const [error, setError] = useState('')
+  const [polishing, setPolishing] = useState(false)
+  const [polishNote, setPolishNote] = useState('')
+
+  async function handlePolish() {
+    if (!requirements.trim()) {
+      setError('Write some rough requirements first — the AI will clean them up.')
+      return
+    }
+    setError('')
+    setPolishNote('')
+    setPolishing(true)
+    try {
+      const res = await fetch('/api/polish', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          requirements,
+          constraints,
+          siteUrl: url.trim() || undefined,
+        }),
+      })
+      const body = await res.json()
+      if (!res.ok) {
+        setError(body.error || 'Polish failed')
+        return
+      }
+      if (body.requirements) setRequirements(body.requirements)
+      if (typeof body.constraints === 'string') setConstraints(body.constraints)
+      setPolishNote('Rewritten by AI — review before running analysis.')
+    } catch (e) {
+      setError('Polish request failed: ' + (e instanceof Error ? e.message : 'unknown'))
+    } finally {
+      setPolishing(false)
+    }
+  }
 
   function handleStart() {
     if (!url.trim()) {
@@ -72,13 +107,33 @@ export function HomeInput() {
             />
           </Field>
 
-          <Field label="Tracking Requirements">
+          <Field
+            label="Tracking Requirements"
+            action={
+              <button
+                type="button"
+                onClick={handlePolish}
+                disabled={polishing}
+                className="text-[11px] font-medium text-violet-300 hover:text-violet-200 disabled:text-gray-600 flex items-center gap-1"
+              >
+                {polishing ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : (
+                  <Wand2 className="w-3 h-3" />
+                )}
+                {polishing ? 'Polishing…' : 'Polish with AI'}
+              </button>
+            }
+          >
             <Textarea
               value={requirements}
               onChange={(e) => setRequirements(e.target.value)}
-              placeholder="Capture product ID, name, price, and add-to-cart clicks on product detail pages."
+              placeholder="Capture product ID, name, price, and add-to-cart clicks on product detail pages. (Rough notes in any language are fine — click Polish with AI to rewrite.)"
               className="min-h-28 bg-gray-900 border-gray-800 text-white placeholder:text-gray-600"
             />
+            {polishNote && (
+              <p className="text-[11px] text-violet-300 mt-1">{polishNote}</p>
+            )}
           </Field>
 
           <Field label="Additional Constraints (Optional)">
@@ -111,10 +166,21 @@ export function HomeInput() {
   )
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  children,
+  action,
+}: {
+  label: string
+  children: React.ReactNode
+  action?: React.ReactNode
+}) {
   return (
     <label className="block space-y-1.5">
-      <span className="text-xs font-medium text-gray-300 uppercase tracking-wide">{label}</span>
+      <span className="flex items-center justify-between">
+        <span className="text-xs font-medium text-gray-300 uppercase tracking-wide">{label}</span>
+        {action}
+      </span>
       {children}
     </label>
   )
