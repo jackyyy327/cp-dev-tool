@@ -1,5 +1,6 @@
 import type {
   AnalysisResult,
+  AttributeCandidate,
   DataObjectDraft,
   EventDraft,
   InteractionName,
@@ -36,13 +37,44 @@ export function codeFromAnalysis(analysis: AnalysisResult): string {
     lines.push('')
   }
 
+  const hasConsent = analysis.attributes.some(
+    (a) => a.category === 'Consent' && a.review?.state !== 'rejected',
+  )
+
   lines.push('SalesforceInteractions.init({')
   lines.push('  cookieDomain: "' + safeDomain(analysis.site.url) + '",')
+  if (hasConsent) {
+    lines.push('  consents: [{')
+    lines.push('    purpose: SalesforceInteractions.mcis.ConsentPurpose.Personalization,')
+    lines.push('    provider: "Example Consent Manager", // TODO: replace with your consent manager')
+    lines.push('    status: SalesforceInteractions.ConsentStatus.OptIn,')
+    lines.push('  }],')
+  }
   lines.push('}).then(() => {')
-  lines.push('  SalesforceInteractions.initSitemap({')
+
+  // Resolve locale for global config
+  const localeAttr = analysis.attributes.find(
+    (a) => a.name === 'language' && a.category === 'Locale' && a.review?.state !== 'rejected',
+  )
+
+  lines.push('  const sitemapConfig = {')
   lines.push('    global: {')
-  lines.push('      onActionEvent: (actionEvent) => actionEvent,')
+  if (localeAttr) {
+    lines.push('      locale: ' + guessLocaleValue(analysis) + ',')
+  }
+  renderOnActionEvent(lines, analysis)
+  renderGlobalContentZones(lines)
+  renderGlobalListeners(lines, analysis)
   lines.push('    },')
+
+  // pageTypeDefault
+  lines.push('    pageTypeDefault: {')
+  lines.push('      name: "default",')
+  lines.push('      interaction: {')
+  lines.push('        name: "Default Page",')
+  lines.push('      },')
+  lines.push('    },')
+
   lines.push('    pageTypes: [')
   const activePts = analysis.pageTypes
     .filter((pt) => pt.review?.state !== 'rejected')
@@ -55,10 +87,114 @@ export function codeFromAnalysis(analysis: AnalysisResult): string {
     renderPageType(lines, pt, analysis)
   }
   lines.push('    ],')
-  lines.push('  })')
+  lines.push('  };')
+  lines.push('  SalesforceInteractions.initSitemap(sitemapConfig);')
   lines.push('})')
   lines.push('')
   return lines.join('\n')
+}
+
+// ——— global.onActionEvent ———
+
+function renderOnActionEvent(lines: string[], analysis: AnalysisResult): void {
+  const activeAttrs = analysis.attributes.filter(
+    (a) => a.review?.state !== 'rejected' && a.status !== 'excluded',
+  )
+  const identityAttrs = activeAttrs.filter((a) => a.category === 'Identity')
+  const userAttrs = activeAttrs.filter(
+    (a) => a.category !== 'Identity' && a.category !== 'Consent',
+  )
+
+  const hasIdentity = identityAttrs.length > 0
+  const hasUserAttrs = userAttrs.length > 0
+
+  if (!hasIdentity && !hasUserAttrs) {
+    lines.push('      onActionEvent: (actionEvent) => actionEvent,')
+    return
+  }
+
+  lines.push('      onActionEvent: (actionEvent) => {')
+  lines.push('        actionEvent.user = actionEvent.user || {};')
+
+  if (hasIdentity) {
+    lines.push('')
+    lines.push('        // Identity capture — resolve the user across sessions')
+    lines.push('        actionEvent.user.identities = actionEvent.user.identities || {};')
+    lines.push('        const email = SalesforceInteractions.mcis.getValueFromNestedObject(')
+    lines.push('          "window._etmc.user_info.email"')
+    lines.push('        );')
+    lines.push('        if (email) {')
+    lines.push('          actionEvent.user.identities.emailAddress = email;')
+    lines.push('        }')
+  }
+
+  if (hasUserAttrs) {
+    lines.push('')
+    lines.push('        // User attributes')
+    lines.push('        actionEvent.user.attributes = actionEvent.user.attributes || {};')
+    for (const attr of userAttrs) {
+      const expr = attributeExpression(attr)
+      if (expr) {
+        lines.push('        actionEvent.user.attributes.' + attr.name + ' = { value: ' + expr + ' };')
+      }
+    }
+  }
+
+  lines.push('')
+  lines.push('        return actionEvent;')
+  lines.push('      },')
+}
+
+function attributeExpression(attr: AttributeCandidate): string | null {
+  switch (attr.name) {
+    case 'language':
+      return 'document.documentElement.lang'
+    case 'market':
+      if (attr.proposedSource.includes('URL'))
+        return 'window.location.pathname.split("/").filter(Boolean)[0]'
+      return 'document.documentElement.lang?.split("-")[1]'
+    case 'loginStatus':
+      return 'document.querySelector(".logout, [href*=logout], [href*=signout]") ? "logged_in" : "anonymous"'
+    case 'customerType':
+      return null
+    case 'locale':
+      return 'document.documentElement.lang'
+    default:
+      return null
+  }
+}
+
+// ——— global.contentZones ———
+
+function renderGlobalContentZones(lines: string[]): void {
+  lines.push('      contentZones: [')
+  lines.push('        { name: "global_infobar_top_of_page", selector: "header" },')
+  lines.push('        { name: "global_infobar_bottom_of_page", selector: "footer" },')
+  lines.push('      ],')
+}
+
+// ——— global.listeners (email signup) ———
+
+function renderGlobalListeners(lines: string[], analysis: AnalysisResult): void {
+  const hasIdentity = analysis.attributes.some(
+    (a) => a.category === 'Identity' && a.review?.state !== 'rejected',
+  )
+  if (!hasIdentity) return
+
+  lines.push('      listeners: [')
+  lines.push('        SalesforceInteractions.listener("submit", ".email-signup, .newsletter-form", () => {')
+  lines.push('          const emailInput = document.querySelector(\'input[type="email"], input[name*="email"]\');')
+  lines.push('          const email = emailInput ? emailInput.value : null;')
+  lines.push('          if (email) {')
+  lines.push('            SalesforceInteractions.sendEvent({')
+  lines.push('              interaction: { name: "Email Sign Up" },')
+  lines.push('              user: {')
+  lines.push('                identities: { emailAddress: email },')
+  lines.push('              },')
+  lines.push('            });')
+  lines.push('          }')
+  lines.push('        }),')
+  lines.push('      ],')
 }
 
 function collectRequiredHelpers(analysis: AnalysisResult): Set<string> {
@@ -118,25 +254,46 @@ function renderCatalogObject(
 }
 
 function renderListener(lines: string[], ev: EventDraft, analysis: AnalysisResult): void {
-  lines.push('          {')
+  const isLoginEvent = ev.customName === 'Logged In' || ev.customName === 'Login'
+  lines.push('          SalesforceInteractions.listener(')
   if (ev.kind === 'interaction' && ev.interactionName) {
-    lines.push('            selector: ' + jsString(selectorFromHint(ev.triggerHint)) + ',')
-    lines.push('            handler: (event) => SalesforceInteractions.sendEvent({')
-    lines.push('              interaction: {')
-    lines.push('                name: SalesforceInteractions.' + interactionNamespace(ev.interactionName) + '.' + ev.interactionName + ',')
+    lines.push('            "click",')
+    lines.push('            ' + jsString(selectorFromHint(ev.triggerHint)) + ',')
+    lines.push('            () => {')
+    lines.push('              SalesforceInteractions.sendEvent({')
+    lines.push('                interaction: {')
+    lines.push('                  name: SalesforceInteractions.' + interactionNamespace(ev.interactionName) + '.' + ev.interactionName + ',')
     const object = ev.objectRef
       ? analysis.dataObjects.find((d) => d.id === ev.objectRef)
       : undefined
-    if (object) renderCatalogObject(lines, object, 16)
-    lines.push('              },')
-    lines.push('            }),')
+    if (object) renderCatalogObject(lines, object, 18)
+    lines.push('                },')
+    lines.push('              });')
+    lines.push('            }')
   } else if (ev.kind === 'customEvent' && ev.customName) {
-    lines.push('            selector: ' + jsString(selectorFromHint(ev.triggerHint)) + ',')
-    lines.push('            handler: (event) => SalesforceInteractions.sendEvent({')
-    lines.push('              interaction: { name: ' + jsString(ev.customName) + ' },')
-    lines.push('            }),')
+    const eventType = isLoginEvent ? '"submit"' : '"click"'
+    lines.push('            ' + eventType + ',')
+    lines.push('            ' + jsString(selectorFromHint(ev.triggerHint)) + ',')
+    lines.push('            () => {')
+    if (isLoginEvent) {
+      lines.push('              const emailInput = document.querySelector(\'input[type="email"], input[name*="email"]\');')
+      lines.push('              const email = emailInput ? emailInput.value : null;')
+      lines.push('              SalesforceInteractions.sendEvent({')
+      lines.push('                interaction: { name: ' + jsString(ev.customName) + ' },')
+      lines.push('                user: {')
+      lines.push('                  identities: {')
+      lines.push('                    emailAddress: email || undefined,')
+      lines.push('                  },')
+      lines.push('                },')
+      lines.push('              });')
+    } else {
+      lines.push('              SalesforceInteractions.sendEvent({')
+      lines.push('                interaction: { name: ' + jsString(ev.customName) + ' },')
+      lines.push('              });')
+    }
+    lines.push('            }')
   }
-  lines.push('          },')
+  lines.push('          ),')
 }
 
 function interactionNamespace(name: InteractionName): string {
@@ -163,7 +320,6 @@ function fieldExpression(field: { name: string; source: string; selectorHint?: s
 }
 
 function compileIsMatch(hint: string): string {
-  const lower = hint.toLowerCase()
   // pathname === "/exact/path"
   const eq = hint.match(/pathname\s*===?\s*["']([^"']+)["']/i)
   if (eq) return 'window.location.pathname === ' + jsString(eq[1])
@@ -196,4 +352,15 @@ function safeDomain(url: string): string {
 
 function jsString(value: string): string {
   return '"' + value.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"'
+}
+
+function guessLocaleValue(analysis: AnalysisResult): string {
+  const langSignal = analysis.site.sampledPages
+    .flatMap((p) => p.signals)
+    .find((s) => s.startsWith('html:lang='))
+  if (langSignal) {
+    const lang = langSignal.replace('html:lang=', '').replace('-', '_')
+    return jsString(lang)
+  }
+  return '"en_US" // TODO: set locale'
 }

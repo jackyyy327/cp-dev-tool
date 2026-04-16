@@ -115,6 +115,52 @@ export function designDocFromAnalysis(analysis: AnalysisResult): string {
     lines.push('')
   }
 
+  // ——— Identity & Data Capture Strategy ———
+  const identityAttrs = activeAttrs.filter((a) => a.category === 'Identity')
+  const consentAttrs = activeAttrs.filter((a) => a.category === 'Consent')
+  const hasLoginEvent = activeEvents.some(
+    (e) => e.customName === 'Logged In' || e.customName === 'Login',
+  )
+
+  lines.push('## Identity & Data Capture Strategy')
+  lines.push('')
+  if (identityAttrs.length > 0 || hasLoginEvent || consentAttrs.length > 0) {
+    lines.push('### Consent')
+    lines.push('')
+    if (consentAttrs.length > 0) {
+      lines.push(
+        '- Consent banner detected — `SalesforceInteractions.init()` should gate on consent status',
+      )
+      lines.push(
+        '- Configure the `consents` array in `init()` with your consent manager provider name',
+      )
+    } else {
+      lines.push('- No consent banner detected — verify with the client before deploying without consent gating')
+    }
+    lines.push('')
+
+    lines.push('### Identity Resolution')
+    lines.push('')
+    lines.push(
+      '- **Global `onActionEvent`**: Captures `user.identities.emailAddress` from data layer / SFMC tag on every page',
+    )
+    if (hasLoginEvent) {
+      lines.push(
+        '- **Login listener**: Captures email identity on form submission and sends a "Logged In" event',
+      )
+    }
+    lines.push(
+      '- **Email signup listener**: Captures email identity from newsletter / signup forms in global scope',
+    )
+    lines.push(
+      '- Identity attributes accumulate across pages in a single visit for improved resolution',
+    )
+    lines.push('')
+  } else {
+    lines.push('No identity signals detected. User tracking will be anonymous-only until identity sources are configured.')
+    lines.push('')
+  }
+
   // ——— User Attributes ———
   lines.push('## User Attributes')
   lines.push('')

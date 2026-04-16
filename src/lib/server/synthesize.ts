@@ -276,6 +276,27 @@ export function synthesize(samples: RawSample[]): SynthesizeOutput {
       }
     }
 
+    // Login / registration pages — emit identity-capturing event
+    const loginUrlPattern = /\/(login|signin|sign-in|log-in|register|signup|sign-up|my-?account)(?![a-zA-Z0-9])/i
+    if (loginUrlPattern.test(cluster.template) || sigSet.has('account/identity hint') || sigSet.has('account/identity hint (JA)')) {
+      const isLoginUrl = loginUrlPattern.test(cluster.template)
+      if (isLoginUrl) {
+        upsertEvent(events, {
+          id: 'ev_login_identity',
+          kind: 'customEvent',
+          customName: 'Logged In',
+          pageTypeRefs: [id],
+          triggerHint: 'form[name="login-form"] button, .login-form button[type="submit"]',
+          origin: {
+            type: isLoginUrl ? 'observed' : 'inferred',
+            reason: 'Login URL pattern matched — identity capture recommended',
+            evidenceRefs: ['ev_url_' + hash(cluster.template)],
+          },
+          review: { state: 'pending' },
+        })
+      }
+    }
+
     const ptOrigin = originForClassification(winner, top, confidence, sigSet)
     pageTypes.push({
       id,
