@@ -3,7 +3,12 @@
 import { useAnalysisStore } from '@/lib/analysis-store'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
-import type { Evidence, EvidenceKind, PageTypeDraft } from '@/types/analysis'
+import type {
+  Evidence,
+  EvidenceKind,
+  EvidenceLocation,
+  PageTypeDraft,
+} from '@/types/analysis'
 import {
   Check,
   X,
@@ -14,6 +19,7 @@ import {
   Gauge,
   Scale,
   GitCompare,
+  ExternalLink,
 } from 'lucide-react'
 
 const KIND_META: Record<
@@ -36,10 +42,15 @@ interface Props {
 export function EvidencePane({ pageType }: Props) {
   const { state, dispatch } = useAnalysisStore()
   const analysis = state.analysis!
+  const siteUrl = analysis.site.url
 
   const evidenceList: Evidence[] = pageType
     ? analysis.evidence.filter((e) => pageType.evidenceRefs.includes(e.id))
     : []
+
+  // Lift the scoring evidence's confidence reason to the top of the pane so
+  // consultants see "why this level" without scanning the whole list.
+  const scoringEv = evidenceList.find((e) => e.kind === 'Scoring')
 
   return (
     <aside className="space-y-4">
@@ -48,6 +59,12 @@ export function EvidencePane({ pageType }: Props) {
         {pageType && (
           <div className="text-[11px] text-gray-500 mb-2">
             Confidence: <span className={confColor(pageType.confidence)}>{pageType.confidence}</span>
+          </div>
+        )}
+        {pageType && scoringEv?.confidenceReason && (
+          <div className="mb-3 border-l-2 border-green-900/80 pl-2 text-[11px] text-gray-300 italic">
+            <span className="text-gray-500 not-italic">Why {pageType.confidence}: </span>
+            {scoringEv.confidenceReason}
           </div>
         )}
         {evidenceList.length === 0 ? (
@@ -79,7 +96,10 @@ export function EvidencePane({ pageType }: Props) {
                         ))}
                       </div>
                     )}
-                    {ev.confidenceReason && (
+                    {ev.locations && ev.locations.length > 0 && (
+                      <LocationsList locations={ev.locations} siteUrl={siteUrl} />
+                    )}
+                    {ev.confidenceReason && ev.kind !== 'Scoring' && (
                       <div className="text-[11px] text-green-400/70 italic">
                         Why: {ev.confidenceReason}
                       </div>
@@ -154,6 +174,61 @@ export function EvidencePane({ pageType }: Props) {
       </Card>
     </aside>
   )
+}
+
+function LocationsList({
+  locations,
+  siteUrl,
+}: {
+  locations: EvidenceLocation[]
+  siteUrl: string
+}) {
+  return (
+    <ul className="pt-1 space-y-1.5">
+      {locations.slice(0, 12).map((loc, i) => {
+        const href = toAbsolute(siteUrl, loc.url)
+        return (
+          <li key={i} className="border-l border-gray-800 pl-2">
+            <a
+              href={href}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-[11px] font-mono text-blue-400 hover:text-blue-300 break-all"
+            >
+              <ExternalLink className="w-3 h-3 shrink-0" />
+              {loc.url}
+            </a>
+            {loc.label && loc.label !== loc.url && (
+              <div className="text-[10px] text-gray-500 italic">{loc.label}</div>
+            )}
+            {loc.patternName && (
+              <div className="text-[10px] text-gray-600">matched: {loc.patternName}</div>
+            )}
+            {loc.snippet && (
+              <div className="text-[11px] text-gray-400 font-mono bg-gray-950/60 border border-gray-800/60 rounded px-1.5 py-1 mt-0.5 break-words">
+                …{loc.snippet}…
+              </div>
+            )}
+          </li>
+        )
+      })}
+      {locations.length > 12 && (
+        <li className="text-[10px] text-gray-600 pl-2">
+          +{locations.length - 12} more
+        </li>
+      )}
+    </ul>
+  )
+}
+
+function toAbsolute(siteUrl: string, path: string): string {
+  if (/^https?:\/\//i.test(path)) return path
+  try {
+    const origin = new URL(siteUrl).origin
+    return origin + (path.startsWith('/') ? path : '/' + path)
+  } catch {
+    return path
+  }
 }
 
 function confColor(c: 'high' | 'medium' | 'low'): string {

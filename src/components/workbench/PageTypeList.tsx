@@ -83,7 +83,14 @@ export function PageTypeList() {
         <ul className="space-y-1.5">
           {analysis.site.sampledPages.map((p) => (
             <li key={p.url} className="text-xs">
-              <div className="text-gray-300 font-mono truncate">{p.url}</div>
+              <a
+                href={sampleHref(analysis.site.url, p.url)}
+                target="_blank"
+                rel="noreferrer"
+                className="text-gray-300 hover:text-blue-300 font-mono truncate block"
+              >
+                {p.url}
+              </a>
               {p.signals.length > 0 && (
                 <div className="text-gray-600 truncate">{p.signals.join(', ')}</div>
               )}
@@ -93,6 +100,16 @@ export function PageTypeList() {
       </Card>
     </aside>
   )
+}
+
+function sampleHref(siteUrl: string, path: string): string {
+  if (/^https?:\/\//i.test(path)) return path
+  try {
+    const origin = new URL(siteUrl).origin
+    return origin + (path.startsWith('/') ? path : '/' + path)
+  } catch {
+    return path
+  }
 }
 
 function Row({ k, v }: { k: string; v: string }) {

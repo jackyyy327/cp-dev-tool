@@ -128,6 +128,17 @@ export type EvidenceSource =
   | 'LanguageSignal'
   | 'AttributeHint'
 
+// A verifiable pointer back to a specific sampled page and the raw text
+// snippet that produced a signal. Consultants click the url to open the page
+// in a new tab and use the snippet as a Ctrl-F anchor to locate the signal
+// on the live DOM.
+export interface EvidenceLocation {
+  url: string // site-relative path (e.g. "/products/baggies") or absolute
+  snippet?: string // plain-text excerpt around the regex match
+  patternName?: string // human-readable name of the probe that matched
+  label?: string // optional per-location tag (typically the signal token)
+}
+
 export interface Evidence {
   id: string
   kind: EvidenceKind
@@ -136,6 +147,7 @@ export interface Evidence {
   pageTypeRef?: string
   source?: EvidenceSource
   matched?: string[]
+  locations?: EvidenceLocation[]
   confidenceReason?: string
   competingInterpretation?: string
   consultantAction?: string

@@ -1,19 +1,32 @@
 import { fetchPage, extractLinks, looksLikeSpaShell } from './fetch-site'
 import type { SampledPage } from '@/types/analysis'
 
+// A structured signal detection: the same token the scoring layer consumes,
+// plus the pattern name and plain-text snippet so the evidence pane can let a
+// consultant verify the signal on the live page. Pages keep an array of these
+// so downstream synthesis can attach per-URL locations to evidence entries.
+export interface SignalHit {
+  token: string
+  patternName?: string
+  snippet?: string
+}
+
 export interface RawSample extends SampledPage {
   html: string
   spaShell: boolean
+  signalHits: SignalHit[]
 }
 
 export async function samplePages(entryUrl: string, maxPages = 8): Promise<RawSample[]> {
   const origin = new URL(entryUrl).origin
   const root = await fetchPage(origin + '/')
+  const rootHits = collectSignalHits(root.html)
   const samples: RawSample[] = [
     {
       url: '/',
       title: root.title,
-      signals: collectSignals(root.html),
+      signals: rootHits.map((h) => h.token),
+      signalHits: rootHits,
       html: root.html,
       spaShell: looksLikeSpaShell(root.html),
     },
@@ -37,10 +50,12 @@ export async function samplePages(entryUrl: string, maxPages = 8): Promise<RawSa
       try {
         // path may contain a preserved query suffix from extractLinks
         const page = await fetchPage(origin + path, 6000)
+        const hits = collectSignalHits(page.html)
         return {
           url: path,
           title: page.title,
-          signals: collectSignals(page.html),
+          signals: hits.map((h) => h.token),
+          signalHits: hits,
           html: page.html,
           spaShell: looksLikeSpaShell(page.html),
         } as RawSample
@@ -53,102 +68,272 @@ export async function samplePages(entryUrl: string, maxPages = 8): Promise<RawSa
   return samples
 }
 
-// Structured list of signal tokens. Each token is stable so the synthesize
-// layer can score against it without regex-in-regex. Tokens are human-readable
-// because they flow directly into Evidence.matched.
+// ——— signal detection ———
 //
-// Signal grammar is intentionally language-agnostic where possible. Where we
-// need text matching (add-to-cart, price), we match an English pattern AND a
-// Japanese pattern so non-English brand sites don't fall back to URL-only.
-export function collectSignals(html: string): string[] {
-  const signals = new Set<string>()
-  const add = (s: string) => signals.add(s)
+// Each Probe emits a stable token (consumed by the scoring layer via
+// sigs.has(token)) and carries a human-readable pattern name + regex so we
+// can extract a snippet around the match for the evidence pane. Tokens are
+// intentionally language-tagged ("(JA)") so consultants can distinguish EN
+// and JA hits at a glance.
+interface Probe {
+  token: string
+  patternName: string
+  regex: RegExp
+}
 
-  // ——— Language / locale meta (language-neutral, flows into attributes) ———
+const PROBES: Probe[] = [
+  // ——— Meta / structured data ———
+  {
+    token: 'canonical present',
+    patternName: '<link rel=canonical>',
+    regex: /<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i,
+  },
+  {
+    token: 'jsonld:Product',
+    patternName: 'JSON-LD @type=Product',
+    regex: /application\/ld\+json[^>]*>[\s\S]*?"@type"\s*:\s*"Product"/i,
+  },
+  {
+    token: 'jsonld:Collection',
+    patternName: 'JSON-LD @type=CollectionPage/ItemList',
+    regex: /application\/ld\+json[^>]*>[\s\S]*?"@type"\s*:\s*"(CollectionPage|ItemList)"/i,
+  },
+  {
+    token: 'jsonld:SearchResults',
+    patternName: 'JSON-LD @type=SearchResultsPage',
+    regex: /application\/ld\+json[^>]*>[\s\S]*?"@type"\s*:\s*"SearchResultsPage"/i,
+  },
+  {
+    token: 'jsonld:Article',
+    patternName: 'JSON-LD @type=Article',
+    regex: /application\/ld\+json[^>]*>[\s\S]*?"@type"\s*:\s*"Article"/i,
+  },
+  {
+    token: 'jsonld:Breadcrumb',
+    patternName: 'JSON-LD @type=BreadcrumbList',
+    regex: /application\/ld\+json[^>]*>[\s\S]*?"@type"\s*:\s*"BreadcrumbList"/i,
+  },
+  {
+    token: 'og:type=product',
+    patternName: 'og:type=product meta',
+    regex: /\bog:type[^>]*content=["']product["']/i,
+  },
+  {
+    token: 'og:type=article',
+    patternName: 'og:type=article meta',
+    regex: /\bog:type[^>]*content=["']article["']/i,
+  },
+  {
+    token: 'sku hint',
+    patternName: 'sku attribute or key',
+    regex: /itemprop=["']sku["']|data-sku=|"sku"\s*:/i,
+  },
+
+  // ——— Commerce DOM — EN + JA variants ———
+  {
+    token: 'add-to-cart control',
+    patternName: 'add-to-cart class/text (EN)',
+    regex: /add[-_\s]?to[-_\s]?cart|addtocart/i,
+  },
+  {
+    token: 'add-to-cart control (JA)',
+    patternName: 'カートに入れる / 購入する',
+    regex: /カートに入れる|カートへ|買い物かごに入れる|購入する|今すぐ購入/,
+  },
+  {
+    token: 'cart form',
+    patternName: '<form action=/cart>',
+    regex: /<form[^>]*action=[^>]*\/cart/i,
+  },
+  {
+    token: 'variant selector',
+    patternName: 'variant / swatch / size class',
+    regex: /variant|swatch|size-selector|option-selector|color-swatch/i,
+  },
+  {
+    token: 'variant selector (JA)',
+    patternName: 'サイズ選択 / カラー選択 / 在庫',
+    regex: /サイズ選択|カラー選択|サイズ・カラー|在庫|品番|SKU/,
+  },
+  {
+    token: 'cart line items',
+    patternName: 'cart-subtotal / line-item class',
+    regex: /cart-(subtotal|total|count)|line-item|cart__line/i,
+  },
+  {
+    token: 'cart line items (JA)',
+    patternName: '小計 / 合計 / 数量',
+    regex: /小計|合計|数量|カートの中|カート商品/,
+  },
+  {
+    token: 'checkout hint',
+    patternName: 'checkout / order / thank-you',
+    regex: /checkout|order-summary|order-confirmation|thank[\s-]?you/i,
+  },
+  {
+    token: 'checkout hint (JA)',
+    patternName: 'ご注文 / お支払い / 注文完了',
+    regex: /ご注文|お支払い|ご購入手続|注文完了|注文確認/,
+  },
+  {
+    token: 'account/identity hint (JA)',
+    patternName: 'ログイン / 会員登録 / マイアカウント',
+    regex: /ログイン|会員登録|マイアカウント|お気に入り/,
+  },
+  {
+    token: 'account/identity hint',
+    patternName: 'login / sign-in / my-account',
+    regex: /login|sign[\s-]?in|my[\s-]?account|wishlist|favorites/i,
+  },
+
+  // ——— Category / listing ———
+  {
+    token: 'product grid',
+    patternName: 'product-card / product-grid / product-list class',
+    regex:
+      /(product-card|product-grid|product-list|collection__grid|products-grid|search-results)/i,
+  },
+  {
+    token: 'breadcrumb nav',
+    patternName: 'breadcrumb class',
+    regex: /breadcrumb/i,
+  },
+  {
+    token: 'filter/sort controls',
+    patternName: 'filter / sort / facet',
+    regex: /\bfilter\b|\bsort\b|facet/i,
+  },
+
+  // ——— Search ———
+  {
+    token: 'search input',
+    patternName: '<input type=search> or q/s/keyword',
+    regex: /<input[^>]*(type=["']search["']|name=["'](q|s|query|keyword)["'])/i,
+  },
+  {
+    token: 'search input (JA)',
+    patternName: '検索 / キーワード',
+    regex: /検索|サイト内検索|キーワード/,
+  },
+
+  // ——— Content ———
+  { token: 'article tag', patternName: '<article> element', regex: /<article\b/i },
+  { token: 'datetime meta', patternName: '<time datetime>', regex: /<time\b[^>]*datetime/i },
+  {
+    token: 'author byline',
+    patternName: 'byline / rel=author',
+    regex: /byline|author[-_]name|rel=["']author["']/i,
+  },
+
+  // ——— Tracking infra (informational) ———
+  {
+    token: 'dataLayer present',
+    patternName: 'dataLayer = / dataLayer.push',
+    regex: /\bdataLayer\s*=|dataLayer\.push/i,
+  },
+  {
+    token: 'GTM container',
+    patternName: 'gtm.start / googletagmanager.com',
+    regex: /gtm\.start|googletagmanager\.com/i,
+  },
+
+  // ——— Pricing ———
+  {
+    token: 'visible price',
+    patternName: 'price class / currency glyph',
+    regex:
+      /class=["'][^"']*\bprice\b[^"']*["']|itemprop=["']price["']|\$\s?\d|¥\s?\d|€\s?\d|￥\s?\d/,
+  },
+  {
+    token: 'visible price (JA)',
+    patternName: '税込 / 税抜 / 円',
+    regex: /税込|税抜|円$|[0-9,]+\s?円/m,
+  },
+
+  // ——— Consent / privacy ———
+  {
+    token: 'consent banner',
+    patternName: 'cookie-consent / onetrust / gdpr',
+    regex:
+      /cookie[\s-]?consent|gdpr|ccpa|onetrust|trustarc|cookielaw|privacy[\s-]?preferences/i,
+  },
+  {
+    token: 'consent banner (JA)',
+    patternName: 'クッキー / プライバシー設定',
+    regex: /クッキー|プライバシー設定/,
+  },
+
+  // ——— Weak-PDP leaf signals ———
+  {
+    token: 'product gallery',
+    patternName: 'product-gallery / image-slider class',
+    regex:
+      /<(div|section)[^>]*class=["'][^"']*(product-(gallery|images|media)|gallery|image-slider|carousel-product)/i,
+  },
+  {
+    token: 'product spec block',
+    patternName: 'product-specs / details class',
+    regex:
+      /<(div|section)[^>]*class=["'][^"']*(product-(specs|details|info)|spec-table|product-attributes)/i,
+  },
+  {
+    token: 'stock state',
+    patternName: 'in stock / out of stock / sold out',
+    regex: /in\s?stock|out\s?of\s?stock|available|sold\s?out/i,
+  },
+  {
+    token: 'stock state (JA)',
+    patternName: '在庫あり / 売り切れ / 完売',
+    regex: /在庫あり|在庫なし|入荷待ち|売り切れ|完売/,
+  },
+]
+
+export function collectSignalHits(html: string): SignalHit[] {
+  const out: SignalHit[] = []
+  const seen = new Set<string>()
+
+  for (const p of PROBES) {
+    if (seen.has(p.token)) continue
+    const m = p.regex.exec(html)
+    if (!m) continue
+    seen.add(p.token)
+    out.push({
+      token: p.token,
+      patternName: p.patternName,
+      snippet: extractSnippet(html, m.index, m[0].length),
+    })
+  }
+
+  // Structured extractors whose token encodes a capture group or a count —
+  // no snippet is produced because the token itself is the evidence.
   const htmlLang = html.match(/<html[^>]*\blang=["']([^"']+)["']/i)
-  if (htmlLang) add('html:lang=' + htmlLang[1].toLowerCase())
-  const hreflangs = Array.from(html.matchAll(/<link[^>]+rel=["']alternate["'][^>]+hreflang=["']([^"']+)["']/gi))
-  if (hreflangs.length > 0) add('hreflang:' + hreflangs.length)
-  const canonical = html.match(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i)
-  if (canonical) add('canonical present')
-
-  // Structured data
-  if (/application\/ld\+json[^>]*>[\s\S]*?"@type"\s*:\s*"Product"/i.test(html)) add('jsonld:Product')
-  if (/application\/ld\+json[^>]*>[\s\S]*?"@type"\s*:\s*"(CollectionPage|ItemList)"/i.test(html))
-    add('jsonld:Collection')
-  if (/application\/ld\+json[^>]*>[\s\S]*?"@type"\s*:\s*"SearchResultsPage"/i.test(html))
-    add('jsonld:SearchResults')
-  if (/application\/ld\+json[^>]*>[\s\S]*?"@type"\s*:\s*"Article"/i.test(html))
-    add('jsonld:Article')
-  if (/application\/ld\+json[^>]*>[\s\S]*?"@type"\s*:\s*"BreadcrumbList"/i.test(html))
-    add('jsonld:Breadcrumb')
-
-  // Meta
-  if (/\bog:type[^>]*content=["']product["']/i.test(html)) add('og:type=product')
-  if (/\bog:type[^>]*content=["']article["']/i.test(html)) add('og:type=article')
-  if (/itemprop=["']sku["']|data-sku=|"sku"\s*:/i.test(html)) add('sku hint')
-
-  // Commerce DOM — English + Japanese variants
-  if (/add[-_\s]?to[-_\s]?cart|addtocart/i.test(html)) add('add-to-cart control')
-  // JA: カートに入れる / カートへ / 買い物かごに入れる / 購入する
-  if (/カートに入れる|カートへ|買い物かごに入れる|購入する|今すぐ購入/.test(html))
-    add('add-to-cart control (JA)')
-  if (/<form[^>]*action=[^>]*\/cart/i.test(html)) add('cart form')
-  if (/variant|swatch|size-selector|option-selector|color-swatch/i.test(html)) add('variant selector')
-  // JA: サイズ / カラー / 在庫 / 品番
-  if (/サイズ選択|カラー選択|サイズ・カラー|在庫|品番|SKU/.test(html)) add('variant selector (JA)')
-  if (/cart-(subtotal|total|count)|line-item|cart__line/i.test(html)) add('cart line items')
-  if (/小計|合計|数量|カートの中|カート商品/.test(html)) add('cart line items (JA)')
-  if (/checkout|order-summary|order-confirmation|thank[\s-]?you/i.test(html)) add('checkout hint')
-  if (/ご注文|お支払い|ご購入手続|注文完了|注文確認/.test(html)) add('checkout hint (JA)')
-  if (/ログイン|会員登録|マイアカウント|お気に入り/.test(html)) add('account/identity hint (JA)')
-  if (/login|sign[\s-]?in|my[\s-]?account|wishlist|favorites/i.test(html)) add('account/identity hint')
-
-  // Category/listing
-  if (
-    /(product-card|product-grid|product-list|collection__grid|products-grid|search-results)/i.test(
-      html,
-    )
+  if (htmlLang) out.push({ token: 'html:lang=' + htmlLang[1].toLowerCase() })
+  const hreflangs = Array.from(
+    html.matchAll(/<link[^>]+rel=["']alternate["'][^>]+hreflang=["']([^"']+)["']/gi),
   )
-    add('product grid')
-  if (/breadcrumb/i.test(html)) add('breadcrumb nav')
-  if (/\bfilter\b|\bsort\b|facet/i.test(html)) add('filter/sort controls')
+  if (hreflangs.length > 0) out.push({ token: 'hreflang:' + hreflangs.length })
 
-  // Search
-  if (/<input[^>]*(type=["']search["']|name=["'](q|s|query|keyword)["'])/i.test(html))
-    add('search input')
-  if (/検索|サイト内検索|キーワード/.test(html)) add('search input (JA)')
-
-  // Content
-  if (/<article\b/i.test(html)) add('article tag')
-  if (/<time\b[^>]*datetime/i.test(html)) add('datetime meta')
-  if (/byline|author[-_]name|rel=["']author["']/i.test(html)) add('author byline')
-
-  // Tracking infra (informational, not classification)
-  if (/\bdataLayer\s*=|dataLayer\.push/i.test(html)) add('dataLayer present')
-  if (/gtm\.start|googletagmanager\.com/i.test(html)) add('GTM container')
-
-  // Pricing — weak signal, but contributes
-  if (/class=["'][^"']*\bprice\b[^"']*["']|itemprop=["']price["']|\$\s?\d|¥\s?\d|€\s?\d|￥\s?\d/.test(html))
-    add('visible price')
-  if (/税込|税抜|円$|[0-9,]+\s?円/m.test(html)) add('visible price (JA)')
-
-  // Consent / privacy
-  if (/cookie[\s-]?consent|gdpr|ccpa|onetrust|trustarc|cookielaw|privacy[\s-]?preferences/i.test(html))
-    add('consent banner')
-  if (/クッキー|プライバシー設定/.test(html)) add('consent banner (JA)')
-
-  // Weak-PDP leaf signals — combined later in scoring
-  if (/<(div|section)[^>]*class=["'][^"']*(product-(gallery|images|media)|gallery|image-slider|carousel-product)/i.test(html))
-    add('product gallery')
-  if (/<(div|section)[^>]*class=["'][^"']*(product-(specs|details|info)|spec-table|product-attributes)/i.test(html))
-    add('product spec block')
-  if (/in\s?stock|out\s?of\s?stock|available|sold\s?out/i.test(html)) add('stock state')
-  if (/在庫あり|在庫なし|入荷待ち|売り切れ|完売/.test(html)) add('stock state (JA)')
-
-  // Title signal
   const h1 = html.match(/<h1[^>]*>([^<]{2,120})<\/h1>/i)
-  if (h1) signals.add('h1: ' + h1[1].replace(/\s+/g, ' ').trim())
+  if (h1) out.push({ token: 'h1: ' + h1[1].replace(/\s+/g, ' ').trim() })
 
-  return Array.from(signals)
+  return out
+}
+
+// Backwards-compatible flat token list for the scoring layer.
+export function collectSignals(html: string): string[] {
+  return collectSignalHits(html).map((h) => h.token)
+}
+
+// Grab ~80 chars of context around a regex match, strip HTML tags, collapse
+// whitespace. For long matches (e.g. JSON-LD blobs), anchor near the end of
+// the match so the snippet surfaces the signal itself rather than the opening
+// <script> tag that may sit hundreds of characters earlier.
+function extractSnippet(html: string, index: number, matchLen: number): string {
+  const matchEnd = index + matchLen
+  const before = matchLen > 120 ? Math.max(0, matchEnd - 120) : Math.max(0, index - 80)
+  const after = Math.min(html.length, matchEnd + 80)
+  const window = html.slice(before, after)
+  const plain = window.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+  if (plain.length > 180) return plain.slice(0, 177) + '…'
+  return plain
 }

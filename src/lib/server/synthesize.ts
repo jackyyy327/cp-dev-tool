@@ -2,6 +2,7 @@ import type {
   DataObjectDraft,
   EventDraft,
   Evidence,
+  EvidenceLocation,
   InteractionName,
   Origin,
   PageTypeDraft,
@@ -64,7 +65,8 @@ export function synthesize(samples: RawSample[]): SynthesizeOutput {
     const confidence = confidenceFromScore(top.score, runnerUp?.score ?? 0, anySpaShell, sigSet.size)
     const evRefs: string[] = []
 
-    // URL pattern evidence
+    // URL pattern evidence — each sampled path becomes a clickable location
+    // so the consultant can open the live page and verify the template.
     const urlEv: Evidence = {
       id: 'ev_url_' + hash(cluster.template),
       kind: 'UrlPattern',
@@ -76,6 +78,7 @@ export function synthesize(samples: RawSample[]): SynthesizeOutput {
         (cluster.pages.length === 1 ? '' : 's') +
         ' match this path template',
       matched: samplePaths,
+      locations: cluster.pages.map((p) => ({ url: p.url, label: p.title })),
       pageTypeRef: id,
     }
     evidence.push(urlEv)
@@ -100,9 +103,25 @@ export function synthesize(samples: RawSample[]): SynthesizeOutput {
     evidence.push(scoringEv)
     evRefs.push(scoringEv.id)
 
-    // Page signal evidence — list concrete signals that fired
+    // Page signal evidence — list concrete signals that fired, plus per-signal
+    // locations (first sampled page where each signal was detected + snippet)
+    // so the consultant can one-click-verify on the live DOM.
     if (sigSet.size > 0) {
       const sigList = Array.from(sigSet)
+      const locations: EvidenceLocation[] = []
+      for (const token of sigList) {
+        for (const p of cluster.pages) {
+          const hit = p.signalHits.find((h) => h.token === token)
+          if (!hit) continue
+          locations.push({
+            url: p.url,
+            snippet: hit.snippet,
+            patternName: hit.patternName,
+            label: token,
+          })
+          break
+        }
+      }
       const signalEv: Evidence = {
         id: 'ev_signal_' + hash(cluster.template),
         kind: 'PageSignal',
@@ -110,6 +129,7 @@ export function synthesize(samples: RawSample[]): SynthesizeOutput {
         label: sigList.slice(0, 4).join(' · '),
         detail: 'All signals observed across sampled pages in this cluster',
         matched: sigList,
+        locations: locations.length > 0 ? locations : undefined,
         pageTypeRef: id,
       }
       evidence.push(signalEv)
