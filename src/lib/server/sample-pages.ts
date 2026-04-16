@@ -328,7 +328,7 @@ export function collectSignals(html: string): string[] {
 // whitespace. For long matches (e.g. JSON-LD blobs), anchor near the end of
 // the match so the snippet surfaces the signal itself rather than the opening
 // <script> tag that may sit hundreds of characters earlier.
-function extractSnippet(html: string, index: number, matchLen: number): string {
+export function extractSnippet(html: string, index: number, matchLen: number): string {
   const matchEnd = index + matchLen
   const before = matchLen > 120 ? Math.max(0, matchEnd - 120) : Math.max(0, index - 80)
   const after = Math.min(html.length, matchEnd + 80)

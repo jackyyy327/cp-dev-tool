@@ -180,11 +180,28 @@ export function synthesize(samples: RawSample[]): SynthesizeOutput {
       })
       objectRefs = ['do_product']
       interactionName = 'ViewCatalogObject'
-      if (
-        sigSet.has('add-to-cart control') ||
-        sigSet.has('cart form') ||
-        sigSet.has('variant selector')
-      ) {
+      // Find the specific page + snippet that triggered the AddToCart so the
+      // origin can point at a concrete observation instead of a generic claim.
+      const cartSignalTokens = [
+        'add-to-cart control',
+        'add-to-cart control (JA)',
+        'cart form',
+        'variant selector',
+        'variant selector (JA)',
+      ]
+      let cartTrigger: { url: string; token: string; snippet?: string } | null = null
+      for (const token of cartSignalTokens) {
+        if (!sigSet.has(token)) continue
+        for (const p of cluster.pages) {
+          const hit = p.signalHits.find((h) => h.token === token)
+          if (hit) {
+            cartTrigger = { url: p.url, token, snippet: hit.snippet }
+            break
+          }
+        }
+        if (cartTrigger) break
+      }
+      if (cartTrigger) {
         upsertEvent(events, {
           id: 'ev_add_to_cart',
           kind: 'interaction',
@@ -194,7 +211,12 @@ export function synthesize(samples: RawSample[]): SynthesizeOutput {
           triggerHint: 'click on add-to-cart control',
           origin: {
             type: 'observed',
-            reason: 'Add-to-cart control detected in product page DOM',
+            reason:
+              'Add-to-cart control (' +
+              cartTrigger.token +
+              ') detected on sampled page ' +
+              cartTrigger.url,
+            evidenceRefs: sigSet.size > 0 ? ['ev_signal_' + hash(cluster.template)] : undefined,
           },
           review: { state: 'pending' },
         })
@@ -234,6 +256,7 @@ export function synthesize(samples: RawSample[]): SynthesizeOutput {
       objectRefs = ['do_order']
       // Purchase is an order-level interaction — only emit if confidence is high
       if (confidence === 'high') {
+        const firstPath = samplePaths[0]
         upsertEvent(events, {
           id: 'ev_purchase',
           kind: 'interaction',
@@ -243,7 +266,10 @@ export function synthesize(samples: RawSample[]): SynthesizeOutput {
           triggerHint: 'order confirmation page load',
           origin: {
             type: 'observed',
-            reason: 'Checkout/order URL anchor matched with high confidence',
+            reason:
+              'Checkout/order URL anchor matched with high confidence' +
+              (firstPath ? ' on sampled path ' + firstPath : ''),
+            evidenceRefs: ['ev_url_' + hash(cluster.template)],
           },
           review: { state: 'pending' },
         })

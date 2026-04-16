@@ -6,7 +6,8 @@ import { PageTypeList } from './PageTypeList'
 import { PageTypeEditor } from './PageTypeEditor'
 import { EvidencePane } from './EvidencePane'
 import { OriginBadge, ReviewControls } from '@/components/trust/TrustBadges'
-import { ArrowLeft, ArrowRight } from 'lucide-react'
+import { ArrowLeft, ArrowRight, ExternalLink } from 'lucide-react'
+import type { EvidenceLocation } from '@/types/analysis'
 
 export function Workbench() {
   const { state, actions } = useAnalysisStore()
@@ -62,7 +63,9 @@ export function Workbench() {
 
 function AttributesStrip() {
   const { state, actions } = useAnalysisStore()
-  const attrs = state.analysis?.attributes ?? []
+  const analysis = state.analysis
+  const attrs = analysis?.attributes ?? []
+  const siteUrl = analysis?.site.url ?? ''
   if (attrs.length === 0) {
     return (
       <section className="border border-gray-800 rounded bg-gray-900/40 p-4 text-xs text-gray-500">
@@ -85,46 +88,98 @@ function AttributesStrip() {
         </div>
       </div>
       <ul className="grid gap-2 md:grid-cols-2 lg:grid-cols-3">
-        {attrs.map((a) => (
-          <li
-            key={a.id}
-            className={
-              'border rounded px-3 py-2 text-xs bg-gray-950/60 ' +
-              (a.status === 'excluded'
-                ? 'border-red-900/50 text-red-300'
-                : 'border-gray-800 text-gray-300')
-            }
-          >
-            <div className="flex items-center justify-between gap-2">
-              <span className="font-medium text-gray-100">
-                {a.name}
-                <span className="ml-1 text-[10px] text-gray-500">({a.category})</span>
-              </span>
-              <span
-                className={
-                  'text-[10px] uppercase border rounded px-1.5 py-0.5 ' +
-                  (confColor[a.confidence] ?? 'text-gray-400 border-gray-700')
-                }
-              >
-                {a.status === 'excluded' ? 'excluded' : a.confidence}
-              </span>
-            </div>
-            <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
-              <OriginBadge origin={a.origin} />
-              {a.status !== 'excluded' && (
-                <ReviewControls
-                  review={a.review}
-                  compact
-                  onChange={(rs) => actions.review('attribute', a.id, rs)}
-                />
+        {attrs.map((a) => {
+          const locations = (
+            analysis?.evidence
+              .filter((e) => a.evidenceRefs.includes(e.id))
+              .flatMap((e) => e.locations ?? []) ?? []
+          ).slice(0, 3)
+          return (
+            <li
+              key={a.id}
+              className={
+                'border rounded px-3 py-2 text-xs bg-gray-950/60 ' +
+                (a.status === 'excluded'
+                  ? 'border-red-900/50 text-red-300'
+                  : 'border-gray-800 text-gray-300')
+              }
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium text-gray-100">
+                  {a.name}
+                  <span className="ml-1 text-[10px] text-gray-500">({a.category})</span>
+                </span>
+                <span
+                  className={
+                    'text-[10px] uppercase border rounded px-1.5 py-0.5 ' +
+                    (confColor[a.confidence] ?? 'text-gray-400 border-gray-700')
+                  }
+                >
+                  {a.status === 'excluded' ? 'excluded' : a.confidence}
+                </span>
+              </div>
+              <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+                <OriginBadge origin={a.origin} />
+                {a.status !== 'excluded' && (
+                  <ReviewControls
+                    review={a.review}
+                    compact
+                    onChange={(rs) => actions.review('attribute', a.id, rs)}
+                  />
+                )}
+              </div>
+              <div className="mt-1.5 text-gray-500">source: {a.proposedSource}</div>
+              <div className="mt-1 text-gray-500">{a.confidenceReason}</div>
+              <div className="mt-1 text-amber-200/80">→ {a.consultantAction}</div>
+              {locations.length > 0 && (
+                <AttributeLocations locations={locations} siteUrl={siteUrl} />
               )}
-            </div>
-            <div className="mt-1.5 text-gray-500">source: {a.proposedSource}</div>
-            <div className="mt-1 text-gray-500">{a.confidenceReason}</div>
-            <div className="mt-1 text-amber-200/80">→ {a.consultantAction}</div>
-          </li>
-        ))}
+            </li>
+          )
+        })}
       </ul>
     </section>
   )
+}
+
+function AttributeLocations({
+  locations,
+  siteUrl,
+}: {
+  locations: EvidenceLocation[]
+  siteUrl: string
+}) {
+  return (
+    <ul className="mt-2 space-y-1 border-t border-gray-800/60 pt-2">
+      {locations.map((loc, i) => (
+        <li key={i} className="text-[10px] leading-snug">
+          <a
+            href={toAbsoluteUrl(siteUrl, loc.url)}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 font-mono break-all"
+          >
+            <ExternalLink className="w-2.5 h-2.5 shrink-0" />
+            {loc.url}
+          </a>
+          {loc.patternName && (
+            <span className="text-gray-600"> · {loc.patternName}</span>
+          )}
+          {loc.snippet && (
+            <div className="mt-0.5 font-mono text-gray-500 break-words">…{loc.snippet}…</div>
+          )}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function toAbsoluteUrl(siteUrl: string, path: string): string {
+  if (/^https?:\/\//i.test(path)) return path
+  try {
+    const origin = new URL(siteUrl).origin
+    return origin + (path.startsWith('/') ? path : '/' + path)
+  } catch {
+    return path
+  }
 }

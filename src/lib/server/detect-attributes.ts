@@ -1,5 +1,5 @@
-import type { AttributeCandidate, Evidence } from '@/types/analysis'
-import type { RawSample } from './sample-pages'
+import type { AttributeCandidate, Evidence, EvidenceLocation } from '@/types/analysis'
+import { extractSnippet, type RawSample } from './sample-pages'
 
 export interface AttributeContext {
   samples: RawSample[]
@@ -75,6 +75,7 @@ export function detectAttributes(ctx: AttributeContext): DetectedAttributes {
         confidenceReason: a.confidenceReason,
         consultantAction: a.consultantAction,
         matched: ev.matched,
+        locations: ev.locations,
         ...ev,
       }
       evidence.push(e)
@@ -94,6 +95,29 @@ export function detectAttributes(ctx: AttributeContext): DetectedAttributes {
     if (hreflangCount) matched.push(hreflangCount)
     if (pathLocale) matched.push('path locale "' + pathLocale + '"')
     const confidence = hasMultipleLangSignals ? 'high' : 'medium'
+    const langLocations: EvidenceLocation[] = []
+    if (htmlLangSignal) {
+      const loc = locateRegex(
+        ctx.samples,
+        /<html[^>]*\blang=["']([^"']+)["']/i,
+        'html[lang] attribute',
+        htmlLangSignal,
+      )
+      if (loc) langLocations.push(loc)
+    }
+    if (hreflangCount) {
+      const loc = locateRegex(
+        ctx.samples,
+        /<link[^>]+rel=["']alternate["'][^>]+hreflang=["']([^"']+)["']/i,
+        'hreflang alternate link',
+        hreflangCount,
+      )
+      if (loc) langLocations.push(loc)
+    }
+    if (pathLocale) {
+      const pathLoc = locatePathSegment(ctx.samples, pathLocale)
+      if (pathLoc) langLocations.push(pathLoc)
+    }
     push(
       {
         id: 'attr_language',
@@ -115,9 +139,22 @@ export function detectAttributes(ctx: AttributeContext): DetectedAttributes {
         fromRequirement: false,
         evidenceRefs: [],
       },
-      { matched },
+      { matched, locations: langLocations.length > 0 ? langLocations : undefined },
     )
     if (pathLocale || (hreflangCount && htmlLangSignal)) {
+      const marketLocations: EvidenceLocation[] = []
+      if (pathLocale) {
+        const loc = locatePathSegment(ctx.samples, pathLocale)
+        if (loc) marketLocations.push(loc)
+      } else if (hreflangCount) {
+        const loc = locateRegex(
+          ctx.samples,
+          /<link[^>]+rel=["']alternate["'][^>]+hreflang=["']([^"']+)["']/i,
+          'hreflang alternate link',
+          hreflangCount,
+        )
+        if (loc) marketLocations.push(loc)
+      }
       push(
         {
           id: 'attr_market',
@@ -135,13 +172,20 @@ export function detectAttributes(ctx: AttributeContext): DetectedAttributes {
           fromRequirement: false,
           evidenceRefs: [],
         },
-        { matched: pathLocale ? ['path:' + pathLocale] : [hreflangCount!] },
+        {
+          matched: pathLocale ? ['path:' + pathLocale] : [hreflangCount!],
+          locations: marketLocations.length > 0 ? marketLocations : undefined,
+        },
       )
     }
   }
 
   // ——— Identity State ———
   if (allSignals.has('account/identity hint') || allSignals.has('account/identity hint (JA)')) {
+    const token = allSignals.has('account/identity hint (JA)')
+      ? 'account/identity hint (JA)'
+      : 'account/identity hint'
+    const loc = locateSignal(ctx.samples, token)
     push(
       {
         id: 'attr_login_status',
@@ -159,16 +203,14 @@ export function detectAttributes(ctx: AttributeContext): DetectedAttributes {
         fromRequirement: false,
         evidenceRefs: [],
       },
-      {
-        matched: [
-          allSignals.has('account/identity hint (JA)') ? 'account/identity hint (JA)' : 'account/identity hint',
-        ],
-      },
+      { matched: [token], locations: loc ? [loc] : undefined },
     )
   }
 
   // ——— Consent ———
   if (allSignals.has('consent banner') || allSignals.has('consent banner (JA)')) {
+    const token = allSignals.has('consent banner (JA)') ? 'consent banner (JA)' : 'consent banner'
+    const loc = locateSignal(ctx.samples, token)
     push(
       {
         id: 'attr_consent_status',
@@ -186,11 +228,7 @@ export function detectAttributes(ctx: AttributeContext): DetectedAttributes {
         fromRequirement: false,
         evidenceRefs: [],
       },
-      {
-        matched: [
-          allSignals.has('consent banner (JA)') ? 'consent banner (JA)' : 'consent banner',
-        ],
-      },
+      { matched: [token], locations: loc ? [loc] : undefined },
     )
   }
 
@@ -286,6 +324,65 @@ export function detectAttributes(ctx: AttributeContext): DetectedAttributes {
   }
 
   return { attributes, evidence }
+}
+
+// Find the first sample whose PROBES registry already captured this token,
+// and borrow its snippet + pattern name. Falls back to null if no sample
+// carries the token (caller then skips locations for this attribute).
+function locateSignal(samples: RawSample[], token: string): EvidenceLocation | null {
+  for (const s of samples) {
+    const hit = s.signalHits.find((h) => h.token === token)
+    if (hit) {
+      return {
+        url: s.url,
+        snippet: hit.snippet,
+        patternName: hit.patternName,
+        label: token,
+      }
+    }
+  }
+  return null
+}
+
+// Run an ad-hoc regex against each sample's html and return a location for
+// the first match. Used for attribute-specific patterns that aren't in the
+// PROBES registry (e.g. html[lang] capture, hreflang links).
+function locateRegex(
+  samples: RawSample[],
+  regex: RegExp,
+  patternName: string,
+  label: string,
+): EvidenceLocation | null {
+  for (const s of samples) {
+    const m = regex.exec(s.html)
+    if (m) {
+      return {
+        url: s.url,
+        snippet: extractSnippet(s.html, m.index, m[0].length),
+        patternName,
+        label,
+      }
+    }
+  }
+  return null
+}
+
+// For URL-encoded attributes (e.g. path locale /jp/), point at the first
+// sample whose path starts with that segment. No snippet — the URL itself
+// is the evidence.
+function locatePathSegment(samples: RawSample[], segment: string): EvidenceLocation | null {
+  const seg = segment.toLowerCase()
+  for (const s of samples) {
+    const first = s.url.split('/').filter(Boolean)[0]?.split('?')[0]?.toLowerCase() ?? ''
+    if (first === seg) {
+      return {
+        url: s.url,
+        patternName: 'URL path segment /' + seg + '/',
+        label: 'path:' + seg,
+      }
+    }
+  }
+  return null
 }
 
 function detectPathLocale(ctx: AttributeContext): string | null {
