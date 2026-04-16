@@ -1,5 +1,5 @@
 import type { AnalysisResult, Evidence, RequirementInput } from '@/types/analysis'
-import { detectPlatform, fetchPage, FetchError } from './fetch-site'
+import { detectPlatform, FetchError } from './fetch-site'
 import { samplePages } from './sample-pages'
 import { synthesize } from './synthesize'
 import { parseRequirements } from './parse-requirements'
@@ -10,16 +10,20 @@ export async function buildAnalysis(
   requirement: RequirementInput,
 ): Promise<AnalysisResult> {
   const normalized = normalizeUrl(siteUrl)
-  const root = await fetchPage(normalized) // throws typed FetchError
-  const platform = detectPlatform(root.html)
 
   let samples
   try {
     samples = await samplePages(normalized)
   } catch (err) {
+    if (err instanceof FetchError) throw err
     const e = err as Error
     throw new FetchError('SamplingFailure', 'Failed to sample pages: ' + e.message)
   }
+  if (samples.length === 0) {
+    throw new FetchError('SamplingFailure', 'No pages could be fetched from ' + normalized)
+  }
+
+  const platform = detectPlatform(samples[0].html)
 
   const { pageTypes, dataObjects, events, evidence } = synthesize(samples)
   const { attributes, evidence: attrEvidence } = detectAttributes({
@@ -93,7 +97,7 @@ export async function buildAnalysis(
   return {
     site: {
       url: normalized,
-      title: root.title,
+      title: samples[0].title,
       platform,
       sampledPages: samples.map(({ url, title, signals }) => ({ url, title, signals })),
     },

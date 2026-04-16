@@ -51,6 +51,14 @@ export async function fetchPage(url: string, timeoutMs = 8000): Promise<FetchedP
         res.status,
       )
     }
+    if (looksLikeBotPage(html)) {
+      throw new FetchError(
+        'BlockedByAntiBot',
+        'Site returned a bot-protection interstitial (Akamai/Cloudflare/etc) instead of real content. ' +
+          'Server-side analysis cannot access this site — try providing specific page URLs or a sitemap.',
+        res.status,
+      )
+    }
     return {
       requestUrl: url,
       finalUrl: res.url,
@@ -126,4 +134,47 @@ export function looksLikeSpaShell(html: string): boolean {
   const stripped = body.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<[^>]+>/g, ' ')
   const visibleText = stripped.replace(/\s+/g, ' ').trim()
   return visibleText.length < 300
+}
+
+// Detect bot-protection interstitial pages (Akamai Bot Manager, Cloudflare,
+// PerimeterX, etc.) that return HTTP 200 but contain no real site content.
+export function looksLikeBotPage(html: string): boolean {
+  // Akamai Bot Manager / ESI-based failover
+  if (/<esi:(remove|vars|comment)\b/i.test(html)) return true
+  if (/botfailover|bot[-_\s]?fail/i.test(html)) return true
+
+  // Common interstitial titles
+  const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i)
+  const title = titleMatch?.[1]?.trim().toLowerCase() ?? ''
+  const botTitles = [
+    'hang tight',
+    'just a moment',
+    'checking your browser',
+    'please wait',
+    'one moment',
+    'access denied',
+    'attention required',
+    'please verify',
+  ]
+  if (botTitles.some((t) => title.includes(t))) return true
+
+  const linkCount = (html.match(/<a\b[^>]*\bhref=["'](?!mailto:|javascript:|#)[^"']+["']/gi) ?? []).length
+
+  // Cloudflare challenge page (not just a Turnstile widget on a real page)
+  if (/cf-browser-verification|cf_chl_opt/i.test(html)) return true
+  if (/challenges\.cloudflare\.com/i.test(html) && linkCount === 0) return true
+
+  // PerimeterX
+  if (/perimeterx|_pxhd|px-captcha/i.test(html)) return true
+
+  // Heuristic: page has substantial text but zero navigable <a href> links
+  if (linkCount === 0) {
+    const bodyMatch = html.match(/<body[\s\S]*?<\/body>/i)
+    const body = bodyMatch ? bodyMatch[0] : html
+    const stripped = body.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<[^>]+>/g, ' ')
+    const text = stripped.replace(/\s+/g, ' ').trim()
+    if (text.length > 200 && text.length < 5000) return true
+  }
+
+  return false
 }

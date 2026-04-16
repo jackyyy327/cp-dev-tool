@@ -1,4 +1,4 @@
-import { fetchPage, extractLinks, looksLikeSpaShell } from './fetch-site'
+import { fetchPage, extractLinks, looksLikeSpaShell, FetchError } from './fetch-site'
 import type { SampledPage } from '@/types/analysis'
 
 // A structured signal detection: the same token the scoring layer consumes,
@@ -17,22 +17,54 @@ export interface RawSample extends SampledPage {
   signalHits: SignalHit[]
 }
 
-export async function samplePages(entryUrl: string, maxPages = 8): Promise<RawSample[]> {
-  const origin = new URL(entryUrl).origin
-  const root = await fetchPage(origin + '/')
-  const rootHits = collectSignalHits(root.html)
-  const samples: RawSample[] = [
-    {
-      url: '/',
-      title: root.title,
-      signals: rootHits.map((h) => h.token),
-      signalHits: rootHits,
-      html: root.html,
-      spaShell: looksLikeSpaShell(root.html),
-    },
-  ]
+const SEED_PATHS = [
+  '/shop',
+  '/products',
+  '/collections',
+  '/category',
+  '/categories',
+  '/search',
+  '/cart',
+  '/blog',
+  '/about',
+  '/pages',
+  '/shop/mens',
+  '/shop/womens',
+  '/shop/new-arrivals',
+]
 
-  const links = extractLinks(root.html, origin).filter((p) => p !== '/')
+export async function samplePages(entryUrl: string, maxPages = 8): Promise<RawSample[]> {
+  const parsed = new URL(entryUrl)
+  const origin = parsed.origin
+  const entryPath = parsed.pathname.replace(/\/+$/, '') || '/'
+  const samples: RawSample[] = []
+  const visited = new Set<string>()
+
+  // Fetch the entry URL (user-provided path, not always '/')
+  const entry = await fetchOneSample(origin, entryPath, visited)
+  if (entry) samples.push(entry)
+
+  // If user gave a subpath, also fetch root '/' for broader link discovery
+  if (entryPath !== '/') {
+    const root = await fetchOneSample(origin, '/', visited)
+    if (root) samples.push(root)
+  }
+
+  // Gather links from all entry samples
+  let links: string[] = []
+  for (const s of samples) {
+    const extracted = extractLinks(s.html, origin).filter((p) => !visited.has(p))
+    links.push(...extracted)
+  }
+  links = [...new Set(links)]
+
+  // If we got very few links from HTML, inject heuristic seed paths
+  if (links.length < 3) {
+    const seeds = SEED_PATHS.filter((p) => !visited.has(p) && !links.includes(p))
+    links.push(...seeds)
+  }
+
+  // Diversify picks by first path segment
   const byFirst = new Map<string, string[]>()
   for (const p of links) {
     const first = p.split('/').filter(Boolean)[0]?.split('?')[0] ?? ''
@@ -42,30 +74,42 @@ export async function samplePages(entryUrl: string, maxPages = 8): Promise<RawSa
   const picks: string[] = []
   for (const group of byFirst.values()) {
     picks.push(...group.slice(0, 2))
-    if (picks.length >= maxPages - 1) break
+    if (picks.length >= maxPages - samples.length) break
   }
 
   const results = await Promise.all(
-    picks.slice(0, maxPages - 1).map(async (path) => {
-      try {
-        // path may contain a preserved query suffix from extractLinks
-        const page = await fetchPage(origin + path, 6000)
-        const hits = collectSignalHits(page.html)
-        return {
-          url: path,
-          title: page.title,
-          signals: hits.map((h) => h.token),
-          signalHits: hits,
-          html: page.html,
-          spaShell: looksLikeSpaShell(page.html),
-        } as RawSample
-      } catch {
-        return null
-      }
-    }),
+    picks.slice(0, maxPages - samples.length).map((path) => fetchOneSample(origin, path, visited)),
   )
   for (const r of results) if (r) samples.push(r)
   return samples
+}
+
+async function fetchOneSample(
+  origin: string,
+  path: string,
+  visited: Set<string>,
+): Promise<RawSample | null> {
+  if (visited.has(path)) return null
+  visited.add(path)
+  try {
+    const page = await fetchPage(origin + path, 6000)
+    const hits = collectSignalHits(page.html)
+    return {
+      url: path,
+      title: page.title,
+      signals: hits.map((h) => h.token),
+      signalHits: hits,
+      html: page.html,
+      spaShell: looksLikeSpaShell(page.html),
+    }
+  } catch (err) {
+    // Re-throw fatal errors from the very first page so buildAnalysis
+    // surfaces the error to the user instead of silently producing empty results.
+    if (err instanceof FetchError && visited.size <= 1) {
+      throw err
+    }
+    return null
+  }
 }
 
 // ——— signal detection ———
