@@ -33,7 +33,7 @@ const SEED_PATHS = [
   '/shop/new-arrivals',
 ]
 
-export async function samplePages(entryUrl: string, maxPages = 8): Promise<RawSample[]> {
+export async function samplePages(entryUrl: string, maxPages = 15): Promise<RawSample[]> {
   const parsed = new URL(entryUrl)
   const origin = parsed.origin
   const entryPath = parsed.pathname.replace(/\/+$/, '') || '/'
@@ -93,10 +93,32 @@ export async function samplePages(entryUrl: string, maxPages = 8): Promise<RawSa
   const sortedGroups = [...byFirst.entries()].sort(
     (a, b) => segPriority(a[0]) - segPriority(b[0]),
   )
+  // Two-pass allocation:
+  // Pass 1 — breadth: 1 page per group ensures we see every URL pattern
+  // Pass 2 — depth: fill remaining budget from high-priority groups so
+  //          product/category templates can be derived from multiple samples
+  const budget = maxPages - samples.length
   const picks: string[] = []
+  const groupQuota: Record<number, number> = { 0: 3, 1: 2, 2: 2, 3: 1 }
+
+  // Pass 1: one from each group
   for (const [, group] of sortedGroups) {
-    picks.push(...group.slice(0, 2))
-    if (picks.length >= maxPages - samples.length) break
+    if (picks.length >= budget) break
+    picks.push(group[0])
+  }
+
+  // Pass 2: add more from commerce-critical groups (priority 0-2)
+  for (const [seg, group] of sortedGroups) {
+    if (picks.length >= budget) break
+    const pri = segPriority(seg)
+    if (pri > 2) continue
+    const max = groupQuota[pri] ?? 2
+    const already = picks.filter((p) => group.includes(p)).length
+    const extra = group.slice(already, max)
+    for (const p of extra) {
+      if (picks.length >= budget) break
+      if (!picks.includes(p)) picks.push(p)
+    }
   }
 
   const results = await Promise.all(
