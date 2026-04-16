@@ -44,7 +44,13 @@ export function codeFromAnalysis(analysis: AnalysisResult): string {
   lines.push('      onActionEvent: (actionEvent) => actionEvent,')
   lines.push('    },')
   lines.push('    pageTypes: [')
-  const activePts = analysis.pageTypes.filter((pt) => pt.review?.state !== 'rejected')
+  const activePts = analysis.pageTypes
+    .filter((pt) => pt.review?.state !== 'rejected')
+    .sort((a, b) => {
+      const aExact = a.isMatchHint.includes('===') ? 0 : 1
+      const bExact = b.isMatchHint.includes('===') ? 0 : 1
+      return aExact - bExact
+    })
   for (const pt of activePts) {
     renderPageType(lines, pt, analysis)
   }
@@ -150,7 +156,7 @@ function fieldExpression(field: { name: string; source: string; selectorHint?: s
     case 'dom':
       return 'document.querySelector(' + jsString(field.selectorHint || '') + ')?.textContent?.trim()'
     case 'url':
-      return 'window.location.pathname.split("/").filter(Boolean).pop()'
+      return 'window.location.pathname.split("/").filter(Boolean).pop() /* TODO: map URL segment to catalog ID */'
     default:
       return 'undefined /* TODO: configure ' + field.source + ' source */'
   }

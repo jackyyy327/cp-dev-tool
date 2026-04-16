@@ -113,7 +113,7 @@ function DesignSummary() {
             </tr>
           </thead>
           <tbody>
-            {analysis.pageTypes.map((pt) => {
+            {analysis.pageTypes.filter((pt) => pt.review?.state !== 'rejected').map((pt) => {
               const object = pt.objectRefs[0]
                 ? analysis.dataObjects.find((d) => d.id === pt.objectRefs[0])
                 : null

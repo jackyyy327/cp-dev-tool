@@ -297,6 +297,27 @@ export function synthesize(samples: RawSample[]): SynthesizeOutput {
     pt.eventRefs = events.filter((e) => e.pageTypeRefs.includes(pt.id)).map((e) => e.id)
   }
 
+  // Dedup same-name page types by appending the distinguishing URL segment
+  const nameCounts = new Map<string, number>()
+  for (const pt of pageTypes) nameCounts.set(pt.name, (nameCounts.get(pt.name) ?? 0) + 1)
+  for (const [name, count] of nameCounts) {
+    if (count <= 1) continue
+    const dupes = pageTypes.filter((pt) => pt.name === name)
+    for (const pt of dupes) {
+      const segs = pt.isMatchHint
+        .replace(/^pathname\s*(===|starts with|matches)\s*["']?/, '')
+        .replace(/["']$/, '')
+        .split('/')
+        .filter(Boolean)
+        .filter((s) => !s.startsWith(':') && !s.startsWith('['))
+      const suffix = segs[segs.length - 1] ?? ''
+      if (suffix) {
+        const label = stripExt(suffix).replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+        pt.name = name + ' (' + label + ')'
+      }
+    }
+  }
+
   return { pageTypes, dataObjects, events, evidence }
 }
 
@@ -428,7 +449,7 @@ function scoreClasses(
   // Corporate / utility URL patterns: the <article> HTML element is used
   // structurally on many corporate and JP sites, so suppress content
   // classification when the URL clearly indicates a non-editorial page type.
-  const corporateUrl = /\/(contact|inquiry|services?|solutions?|seminar|events?|webinar|careers?|recruit|company|corporate|about|privacy|terms|legal|faq|help|support|ir|csr|sustainability)(?![a-zA-Z0-9])/i
+  const corporateUrl = /\/(contact|inquiry|services?|solutions?|seminar|events?|webinar|careers?|recruit|company|corporate|about|privacy|terms|legal|faq|help|support|ir|csr|sustainability|pages)(?![a-zA-Z0-9])/i
   const contentAnchor = !corporateUrl.test(t)
 
   const content = gate(

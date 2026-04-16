@@ -60,7 +60,7 @@ const TEMPLATES: Array<{ pattern: RegExp; intent: Intent }> = [
   // ——— page/event intents ———
   {
     pattern:
-      /\b(product\s*(detail|page|view|impression)|pdp|view\s*(a\s*)?product|product\s*view|view\s*item|browse\s*products?)\b/,
+      /\b(product\s*(detail|page|view|impression|interaction)|pdp|view\s*(a\s*)?product|product\s*view|view\s*item|browse\s*products?)\b/,
     intent: {
       id: 'view_product',
       interaction: 'ViewCatalogObject',
@@ -154,7 +154,7 @@ const TEMPLATES: Array<{ pattern: RegExp; intent: Intent }> = [
     intent: { id: 'attribute_consent', objectTypes: [], attributeBinding: 'consentStatus' },
   },
   {
-    pattern: /\b(enrich|capture|update).*(profile|user|visitor|attribute)\b/,
+    pattern: /\b(enrich|capture|update|track).*(profile|user|visitor|attribute)s?\b/,
     intent: { id: 'enrich_profile', objectTypes: [] },
   },
 ]
@@ -423,10 +423,15 @@ function splitClauses(text: string): string[] {
     .filter(Boolean)
   const out: string[] = []
   for (const s of sentences) {
-    const parts = s.split(/\s*,?\s+but\s+(?=do\s*not|don'?t|never|avoid|exclude)/i)
-    for (const p of parts) {
-      const trimmed = p.trim().replace(/^[,;\s]+|[,;\s]+$/g, '')
-      if (trimmed) out.push(trimmed)
+    // Split on "but + negation" first
+    const negParts = s.split(/\s*,?\s+but\s+(?=do\s*not|don'?t|never|avoid|exclude)/i)
+    for (const p of negParts) {
+      // Then split on commas and "and"/"or" conjunctions to isolate individual intents
+      const subClauses = p.split(/\s*,\s*(?:and\s+)?|\s+and\s+|\s+or\s+/i)
+      for (const sc of subClauses) {
+        const trimmed = sc.trim().replace(/^[,;\s]+|[,;\s]+$/g, '')
+        if (trimmed) out.push(trimmed)
+      }
     }
   }
   return out
