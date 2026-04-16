@@ -6,7 +6,10 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { codeFromAnalysis } from '@/lib/code-from-analysis'
-import { ArrowLeft, Copy, Check } from 'lucide-react'
+import { sitemapJSONFromAnalysis } from '@/lib/export/sitemap-json'
+import { designDocFromAnalysis } from '@/lib/export/design-doc'
+import { downloadJSON, downloadMarkdown, downloadJS } from '@/lib/export/download'
+import { ArrowLeft, Copy, Check, Download, FileJson, FileText, FileCode } from 'lucide-react'
 import { OriginBadge, ReviewBadge } from '@/components/trust/TrustBadges'
 import type {
   AnalysisResult,
@@ -41,16 +44,19 @@ export function ResultPage() {
             <span className="text-sm text-white font-medium">Result</span>
             <span className="text-xs text-gray-600">{analysis.site.url}</span>
           </div>
-          <div className="flex items-center gap-1 bg-gray-900 border border-gray-800 rounded-lg p-1">
-            <TabButton active={tab === 'summary'} onClick={() => setTab('summary')}>
-              Design Summary
-            </TabButton>
-            <TabButton active={tab === 'code'} onClick={() => setTab('code')}>
-              Sitemap Code
-            </TabButton>
-            <TabButton active={tab === 'notes'} onClick={() => setTab('notes')}>
-              Notes
-            </TabButton>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1 bg-gray-900 border border-gray-800 rounded-lg p-1">
+              <TabButton active={tab === 'summary'} onClick={() => setTab('summary')}>
+                Design Summary
+              </TabButton>
+              <TabButton active={tab === 'code'} onClick={() => setTab('code')}>
+                Sitemap Code
+              </TabButton>
+              <TabButton active={tab === 'notes'} onClick={() => setTab('notes')}>
+                Notes
+              </TabButton>
+            </div>
+            <ExportButtons analysis={analysis} code={code} />
           </div>
         </div>
       </header>
@@ -534,6 +540,59 @@ function SitemapCode({ code }: { code: string }) {
       </pre>
     </Card>
   )
+}
+
+function ExportButtons({
+  analysis,
+  code,
+}: {
+  analysis: AnalysisResult
+  code: string
+}) {
+  const domain = safeDomain(analysis.site.url)
+  return (
+    <div className="flex items-center gap-1">
+      <span className="text-[10px] text-gray-600 uppercase tracking-wide mr-1">Export</span>
+      <Button
+        size="xs"
+        variant="outline"
+        onClick={() => downloadJSON(domain + '-sitemap.json', sitemapJSONFromAnalysis(analysis))}
+        className="border-gray-700 text-gray-300 hover:bg-gray-800"
+        title="Download structured JSON config"
+      >
+        <FileJson className="w-3 h-3" />
+        JSON
+      </Button>
+      <Button
+        size="xs"
+        variant="outline"
+        onClick={() => downloadMarkdown(domain + '-design.md', designDocFromAnalysis(analysis))}
+        className="border-gray-700 text-gray-300 hover:bg-gray-800"
+        title="Download client-facing design document"
+      >
+        <FileText className="w-3 h-3" />
+        Design Doc
+      </Button>
+      <Button
+        size="xs"
+        variant="outline"
+        onClick={() => downloadJS(domain + '-sitemap.js', code)}
+        className="border-gray-700 text-gray-300 hover:bg-gray-800"
+        title="Download sitemap.js"
+      >
+        <FileCode className="w-3 h-3" />
+        JS
+      </Button>
+    </div>
+  )
+}
+
+function safeDomain(url: string): string {
+  try {
+    return new URL(url).hostname
+  } catch {
+    return 'site'
+  }
 }
 
 function NotesTab() {
