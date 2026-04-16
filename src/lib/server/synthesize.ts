@@ -313,47 +313,48 @@ function scoreClasses(
   const urlIs = (re: RegExp) => re.test(t)
   const querySearch = samplePaths.some((p) => /\?(q|s|query|keyword|search)=/.test(p))
 
+  // URL-safe word boundary: \b fails on URLs with underscores (/cart_index)
+  // or partial prefixes (/category vs /categor). Use negative lookahead for
+  // alphanumeric instead — treats _, ., /, ?, # as boundaries.
+  // Pattern: (?![a-zA-Z0-9])
+
   // Anchor gates — site-wide DOM signals (header/footer mentions of "cart",
   // "checkout", "add to cart") leak into every cluster, so we only credit
   // commerce classifications when the URL or structured data confirms the
   // page's actual purpose. Without an anchor, the class is capped at 2 points.
   //
   // Weak-structure PDP exception: a leaf slug path (single segment, no query)
-  // with the combined signal set of a terminal product page can raise an
-  // anchor. This catches brand sites that use slug-only URLs like
-  // /baggies.html or /tree-runner without a /products/ prefix.
+  // with page-specific PDP signals can raise an anchor. This catches brand
+  // sites that use slug-only URLs like /baggies.html without a /products/
+  // prefix. Only counts page-specific signals — visible price, stock state,
+  // and variant selectors leak from site-wide headers/footers on commerce
+  // sites and must not contribute to the combo.
   const leafSegs = t === '/' ? [] : t.split('/').filter(Boolean)
   const isLeaf = leafSegs.length >= 1 && leafSegs.length <= 2 && !t.endsWith('/')
   const hasProductCombo =
     [
       has('product gallery'),
       has('product spec block'),
-      has('variant selector'),
-      has('variant selector (JA)'),
       has('add-to-cart control'),
       has('add-to-cart control (JA)'),
-      has('stock state'),
-      has('stock state (JA)'),
       has('sku hint'),
-      has('visible price'),
-      has('visible price (JA)'),
-    ].filter(Boolean).length >= 3
+    ].filter(Boolean).length >= 2
   const hasTerminalBreadcrumb = has('breadcrumb nav') || has('jsonld:Breadcrumb')
   const weakProductAnchor = isLeaf && hasProductCombo && hasTerminalBreadcrumb
   const productAnchor =
     has('jsonld:Product') ||
     has('og:type=product') ||
-    urlIs(/\/(products?|p|item|dp|goods|商品|shouhin)\b/) ||
+    urlIs(/\/(products?|p|item|dp|goods|商品|shouhin)(?![a-zA-Z0-9])/) ||
     weakProductAnchor
   const categoryAnchor =
     has('jsonld:Collection') ||
-    urlIs(/\/(collections?|categor|shop|c|catalog|department|tag|brand)\b/)
-  const cartAnchor = urlIs(/\/(cart|basket|bag|minicart)\b/)
+    urlIs(/\/(collections?|category|categories|shop|c|catalog|department|tag|brand)(?![a-zA-Z0-9])/)
+  const cartAnchor = urlIs(/\/(cart|basket|bag|minicart)(?![a-zA-Z0-9])/)
   const checkoutAnchor = urlIs(
-    /\/(checkout|order(s|-confirmation)?|thank-?you|receipt|complete)\b/,
+    /\/(checkout|order(s|-confirmation)?|thank-?you|receipt|complete)(?![a-zA-Z0-9])/,
   )
   const searchAnchor =
-    has('jsonld:SearchResults') || querySearch || urlIs(/\/search\b/)
+    has('jsonld:SearchResults') || querySearch || urlIs(/\/search(?![a-zA-Z0-9])/)
 
   const product = gate(
     productAnchor,
@@ -366,7 +367,7 @@ function scoreClasses(
         pts: 1,
         h: 'add-to-cart control',
       },
-      urlIs(/\/(products?|p|item|dp|goods)\b/) && { pts: 3, h: 'URL /' + first + '/' },
+      urlIs(/\/(products?|p|item|dp|goods)(?![a-zA-Z0-9])/) && { pts: 3, h: 'URL /' + first + '/' },
       (has('visible price') || has('visible price (JA)')) && { pts: 1, h: 'visible price' },
       has('product gallery') && { pts: 2, h: 'product gallery' },
       has('product spec block') && { pts: 2, h: 'product spec block' },
@@ -380,7 +381,7 @@ function scoreClasses(
     addScore(
       has('jsonld:Collection') && { pts: 5, h: 'jsonld:Collection' },
       has('product grid') && { pts: 3, h: 'product grid layout' },
-      urlIs(/\/(collections?|categor|shop|c|catalog|department|tag|brand)\b/) && {
+      urlIs(/\/(collections?|category|categories|shop|c|catalog|department|tag|brand)(?![a-zA-Z0-9])/) && {
         pts: 3,
         h: 'URL /' + first + '/',
       },
@@ -394,7 +395,7 @@ function scoreClasses(
     addScore(
       has('jsonld:SearchResults') && { pts: 5, h: 'jsonld:SearchResults' },
       querySearch && { pts: 4, h: 'query param q/s/keyword' },
-      urlIs(/\/search\b/) && { pts: 4, h: 'URL /search' },
+      urlIs(/\/search(?![a-zA-Z0-9])/) && { pts: 4, h: 'URL /search' },
       (has('search input') || has('search input (JA)')) && { pts: 1, h: 'search input' },
     ),
   )
@@ -402,7 +403,7 @@ function scoreClasses(
   const cart = gate(
     cartAnchor,
     addScore(
-      urlIs(/\/(cart|basket|bag|minicart)\b/) && { pts: 5, h: 'URL /' + first + '/' },
+      urlIs(/\/(cart|basket|bag|minicart)(?![a-zA-Z0-9])/) && { pts: 5, h: 'URL /' + first + '/' },
       has('cart form') && { pts: 3, h: 'cart form' },
       (has('cart line items') || has('cart line items (JA)')) && { pts: 3, h: 'cart line items' },
     ),
@@ -413,7 +414,7 @@ function scoreClasses(
   const checkout = gate(
     checkoutAnchor,
     addScore(
-      urlIs(/\/(checkout|order(s|-confirmation)?|thank-?you|receipt|complete)\b/) && {
+      urlIs(/\/(checkout|order(s|-confirmation)?|thank-?you|receipt|complete)(?![a-zA-Z0-9])/) && {
         pts: 5,
         h: 'URL /' + first + '/',
       },
@@ -427,14 +428,14 @@ function scoreClasses(
   // Corporate / utility URL patterns: the <article> HTML element is used
   // structurally on many corporate and JP sites, so suppress content
   // classification when the URL clearly indicates a non-editorial page type.
-  const corporateUrl = /\/(contact|inquiry|services?|solutions?|seminar|events?|webinar|careers?|recruit|company|corporate|about|privacy|terms|legal|faq|help|support|ir|csr|sustainability)\b/i
+  const corporateUrl = /\/(contact|inquiry|services?|solutions?|seminar|events?|webinar|careers?|recruit|company|corporate|about|privacy|terms|legal|faq|help|support|ir|csr|sustainability)(?![a-zA-Z0-9])/i
   const contentAnchor = !corporateUrl.test(t)
 
   const content = gate(
     contentAnchor,
     addScore(
       has('jsonld:Article') && { pts: 5, h: 'jsonld:Article' },
-      has('og:type=article') && { pts: 4, h: 'og:type=article' },
+      has('og:type=article') && { pts: 2, h: 'og:type=article' },
       has('article tag') && { pts: 2, h: '<article> element' },
       has('datetime meta') && { pts: 2, h: '<time datetime>' },
       has('author byline') && { pts: 2, h: 'author byline' },
@@ -698,12 +699,12 @@ function nameFor(template: string, cls: Classification, first: RawSample): strin
   }
   const segs = template.split('/').filter(Boolean)
   const nonParams = segs.filter((s) => !s.startsWith(':'))
-  const firstSeg = nonParams[0]?.toLowerCase() ?? ''
+  const firstSeg = stripExt(nonParams[0] ?? '').toLowerCase()
   const hasSlug = segs.some((s) => s.startsWith(':'))
 
   // Locale landing pages: /en, /ja, /en-us, etc.
-  if (segs.length === 1 && /^[a-z]{2}(-[a-z]{2,4})?$/i.test(segs[0])) {
-    const code = segs[0].split('-')[0].toLowerCase()
+  if (segs.length === 1 && /^[a-z]{2}(-[a-z]{2,4})?$/i.test(stripExt(segs[0]))) {
+    const code = stripExt(segs[0]).split('-')[0].toLowerCase()
     const lang = LOCALE_NAMES[code]
     if (lang) return lang + ' Top'
   }
@@ -712,10 +713,14 @@ function nameFor(template: string, cls: Classification, first: RawSample): strin
   const label = CORPORATE_LABELS[firstSeg]
   if (label) return hasSlug ? label + ' Detail' : label
 
+  // Derive from URL segment, stripping file extensions
   if (nonParams.length > 0) {
-    return nonParams[0].replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+    const cleaned = stripExt(nonParams[0]).replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+    if (cleaned.length > 3) return cleaned
   }
-  return first.title?.slice(0, 40) || 'Untitled'
+  // Opaque or very short URL segment — fall back to page title
+  const titleName = first.title?.split(/[|｜]/)[0]?.trim()
+  return titleName?.slice(0, 40) || 'Untitled'
 }
 
 function isMatchHintFor(template: string): string {
@@ -723,6 +728,10 @@ function isMatchHintFor(template: string): string {
   const first = template.split('/').filter(Boolean)[0]
   if (first && !first.startsWith(':')) return 'pathname starts with /' + first + '/'
   return 'pathname matches ' + template
+}
+
+function stripExt(seg: string): string {
+  return seg.replace(/\.(html?|php|aspx?|jsp)$/i, '')
 }
 
 function ensureObject(list: DataObjectDraft[], obj: DataObjectDraft): void {
