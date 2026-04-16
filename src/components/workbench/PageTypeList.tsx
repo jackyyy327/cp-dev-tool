@@ -56,6 +56,11 @@ export function PageTypeList() {
                   <span>·</span>
                   <span className="capitalize">{pt.confidence} confidence</span>
                 </div>
+                {pt.review?.note && (
+                  <div className="mt-1 text-[10px] text-red-300/70 italic truncate">
+                    {pt.review.note}
+                  </div>
+                )}
               </button>
             )
           })}

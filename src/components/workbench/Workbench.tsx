@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { PageTypeList } from './PageTypeList'
 import { PageTypeEditor } from './PageTypeEditor'
 import { EvidencePane } from './EvidencePane'
+import { DecisionsPanel } from './DecisionsPanel'
 import { OriginBadge, ReviewControls } from '@/components/trust/TrustBadges'
 import { ArrowLeft, ArrowRight, ExternalLink } from 'lucide-react'
 import type { EvidenceLocation } from '@/types/analysis'
@@ -56,6 +57,7 @@ export function Workbench() {
           <EvidencePane pageType={selected} />
         </div>
         <AttributesStrip />
+        <DecisionsPanel />
       </main>
     </div>
   )
@@ -131,6 +133,11 @@ function AttributesStrip() {
               <div className="mt-1.5 text-gray-500">source: {a.proposedSource}</div>
               <div className="mt-1 text-gray-500">{a.confidenceReason}</div>
               <div className="mt-1 text-amber-200/80">→ {a.consultantAction}</div>
+              {a.review?.note && (
+                <div className="mt-1.5 text-[11px] text-red-300/80 italic border-l-2 border-red-900/60 pl-2">
+                  {a.review.note}
+                </div>
+              )}
               {locations.length > 0 && (
                 <AttributeLocations locations={locations} siteUrl={siteUrl} />
               )}

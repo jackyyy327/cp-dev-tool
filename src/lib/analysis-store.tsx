@@ -3,8 +3,10 @@
 import {
   createContext,
   useContext,
+  useEffect,
   useMemo,
   useReducer,
+  useRef,
   type ReactNode,
 } from 'react'
 import type {
@@ -17,6 +19,13 @@ import type {
   RequirementInput,
   ReviewState,
 } from '@/types/analysis'
+import {
+  applyMemoryToAnalysis,
+  fingerprintFor,
+  forgetReject,
+  rememberReject,
+  type MemoryTargetKind,
+} from './review-memory'
 
 type ReviewTargetKind = 'pageType' | 'event' | 'attribute'
 
@@ -28,6 +37,7 @@ interface State {
   selectedPageTypeId: string | null
   error: string | null
   errorKind: FailureKind | null
+  memoryVersion: number
 }
 
 type Action =
@@ -49,6 +59,7 @@ type Action =
   | { type: 'CONFIRM_PENDING'; id: string }
   | { type: 'DISMISS_PENDING'; id: string }
   | { type: 'REVIEW'; target: ReviewTargetKind; id: string; state: ReviewState; note?: string }
+  | { type: 'MEMORY_BUMP' }
   | { type: 'RESET' }
 
 const initialState: State = {
@@ -59,6 +70,7 @@ const initialState: State = {
   selectedPageTypeId: null,
   error: null,
   errorKind: null,
+  memoryVersion: 0,
 }
 
 function mapAnalysis(
@@ -81,14 +93,16 @@ function reducer(state: State, action: Action): State {
         error: null,
         errorKind: null,
       }
-    case 'SET_ANALYSIS':
+    case 'SET_ANALYSIS': {
+      const applied = applyMemoryToAnalysis(action.analysis)
       return {
         ...state,
-        analysis: action.analysis,
-        selectedPageTypeId: action.analysis.pageTypes[0]?.id ?? null,
+        analysis: applied,
+        selectedPageTypeId: applied.pageTypes[0]?.id ?? null,
         error: null,
         errorKind: null,
       }
+    }
     case 'SET_ERROR':
       return { ...state, error: action.error, errorKind: action.kind }
     case 'SELECT_PAGE_TYPE':
@@ -246,6 +260,8 @@ function reducer(state: State, action: Action): State {
           ),
         }
       })
+    case 'MEMORY_BUMP':
+      return { ...state, memoryVersion: state.memoryVersion + 1 }
     case 'RESET':
       return initialState
     default:
@@ -269,6 +285,7 @@ interface StoreContext {
     backToInput: () => void
     backToWorkbench: () => void
     review: (target: ReviewTargetKind, id: string, state: ReviewState, note?: string) => void
+    forgetMemoryEntry: (fingerprint: string) => void
   }
 }
 
@@ -276,6 +293,10 @@ const Ctx = createContext<StoreContext | null>(null)
 
 export function AnalysisStoreProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState)
+  const stateRef = useRef(state)
+  useEffect(() => {
+    stateRef.current = state
+  }, [state])
 
   const actions = useMemo(
     () => ({
@@ -294,8 +315,31 @@ export function AnalysisStoreProvider({ children }: { children: ReactNode }) {
       goToResult: () => dispatch({ type: 'SET_PHASE', phase: 'result' }),
       backToInput: () => dispatch({ type: 'RESET' }),
       backToWorkbench: () => dispatch({ type: 'SET_PHASE', phase: 'workbench' }),
-      review: (target: ReviewTargetKind, id: string, reviewState: ReviewState, note?: string) =>
-        dispatch({ type: 'REVIEW', target, id, state: reviewState, note }),
+      review: (target: ReviewTargetKind, id: string, reviewState: ReviewState, note?: string) => {
+        dispatch({ type: 'REVIEW', target, id, state: reviewState, note })
+        const analysis = stateRef.current.analysis
+        if (!analysis) return
+        const siteUrl = analysis.site.url
+        const fp = fingerprintFor(analysis, target as MemoryTargetKind, id)
+        if (!fp) return
+        if (reviewState === 'rejected') {
+          rememberReject(siteUrl, {
+            fingerprint: fp.fingerprint,
+            kind: target as MemoryTargetKind,
+            displayLabel: fp.displayLabel,
+            reason: note || '(no reason given)',
+          })
+        } else {
+          forgetReject(siteUrl, fp.fingerprint)
+        }
+        dispatch({ type: 'MEMORY_BUMP' })
+      },
+      forgetMemoryEntry: (fingerprint: string) => {
+        const analysis = stateRef.current.analysis
+        if (!analysis) return
+        forgetReject(analysis.site.url, fingerprint)
+        dispatch({ type: 'MEMORY_BUMP' })
+      },
     }),
     [],
   )

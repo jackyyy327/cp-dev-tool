@@ -90,16 +90,21 @@ export function ReviewControls({
   const pending = 'border-amber-600 bg-amber-950/40 text-amber-300'
   const rejected = 'border-red-600 bg-red-950/40 text-red-300'
   function promptNote(to: ReviewState) {
+    if (to === 'rejected') {
+      const note = window.prompt(
+        'Why are you rejecting this? (saved across sessions for this site)',
+        review?.note ?? '',
+      )
+      if (note === null) return
+      onChange(to, note || undefined)
+      return
+    }
     if (compact) {
       onChange(to)
       return
     }
     const note = window.prompt(
-      to === 'rejected'
-        ? 'Optional reason for rejecting:'
-        : to === 'confirmed'
-        ? 'Optional confirmation note:'
-        : 'Optional note:',
+      to === 'confirmed' ? 'Optional confirmation note:' : 'Optional note:',
       review?.note ?? '',
     )
     if (note === null) return
