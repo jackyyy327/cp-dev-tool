@@ -718,15 +718,31 @@ function nameFor(template: string, cls: Classification, first: RawSample): strin
     const cleaned = stripExt(nonParams[0]).replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
     if (cleaned.length > 3) return cleaned
   }
-  // Opaque or very short URL segment — fall back to page title
-  const titleName = first.title?.split(/[|｜]/)[0]?.trim()
-  return titleName?.slice(0, 40) || 'Untitled'
+  // Opaque or very short URL segment — fall back to page title.
+  // Pick the shortest meaningful segment (site name is usually the longest).
+  const titleParts = (first.title ?? '').split(/[|｜\-–—]/).map((s) => s.trim()).filter(Boolean)
+  const titleName = titleParts.length > 1
+    ? titleParts.reduce((a, b) => (a.length <= b.length && a.length >= 2 ? a : b))
+    : titleParts[0]
+  if (titleName && titleName.length > 25) return titleName.slice(0, 23) + '…'
+  return titleName || 'Untitled'
 }
 
 function isMatchHintFor(template: string): string {
   if (template === '/') return 'pathname === "/"'
-  const first = template.split('/').filter(Boolean)[0]
-  if (first && !first.startsWith(':')) return 'pathname starts with /' + first + '/'
+  const segs = template.split('/').filter(Boolean)
+  const hasParams = segs.some((s) => s.startsWith(':'))
+  if (!hasParams) {
+    return 'pathname === "/' + segs.join('/') + '"'
+  }
+  const staticPrefix: string[] = []
+  for (const s of segs) {
+    if (s.startsWith(':')) break
+    staticPrefix.push(s)
+  }
+  if (staticPrefix.length > 0) {
+    return 'pathname starts with /' + staticPrefix.join('/') + '/'
+  }
   return 'pathname matches ' + template
 }
 
