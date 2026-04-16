@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { PageTypeList } from './PageTypeList'
 import { PageTypeEditor } from './PageTypeEditor'
 import { EvidencePane } from './EvidencePane'
+import { OriginBadge, ReviewControls } from '@/components/trust/TrustBadges'
 import { ArrowLeft, ArrowRight } from 'lucide-react'
 
 export function Workbench() {
@@ -60,7 +61,7 @@ export function Workbench() {
 }
 
 function AttributesStrip() {
-  const { state } = useAnalysisStore()
+  const { state, actions } = useAnalysisStore()
   const attrs = state.analysis?.attributes ?? []
   if (attrs.length === 0) {
     return (
@@ -108,7 +109,17 @@ function AttributesStrip() {
                 {a.status === 'excluded' ? 'excluded' : a.confidence}
               </span>
             </div>
-            <div className="mt-1 text-gray-500">source: {a.proposedSource}</div>
+            <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+              <OriginBadge origin={a.origin} />
+              {a.status !== 'excluded' && (
+                <ReviewControls
+                  review={a.review}
+                  compact
+                  onChange={(rs) => actions.review('attribute', a.id, rs)}
+                />
+              )}
+            </div>
+            <div className="mt-1.5 text-gray-500">source: {a.proposedSource}</div>
             <div className="mt-1 text-gray-500">{a.confidenceReason}</div>
             <div className="mt-1 text-amber-200/80">→ {a.consultantAction}</div>
           </li>

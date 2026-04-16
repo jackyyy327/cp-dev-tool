@@ -4,7 +4,8 @@ import { useAnalysisStore } from '@/lib/analysis-store'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Trash2, Plus, GitMerge } from 'lucide-react'
+import { Trash2, Plus } from 'lucide-react'
+import { OriginBadge, ReviewControls, TrustRow } from '@/components/trust/TrustBadges'
 import type {
   InteractionName,
   PageTypeDraft,
@@ -28,7 +29,7 @@ interface Props {
 }
 
 export function PageTypeEditor({ pageType }: Props) {
-  const { state, dispatch } = useAnalysisStore()
+  const { state, dispatch, actions } = useAnalysisStore()
   const analysis = state.analysis!
 
   if (!pageType) {
@@ -101,21 +102,17 @@ export function PageTypeEditor({ pageType }: Props) {
               ))}
             </select>
           </div>
-          <div className="flex flex-col gap-1.5">
-            <Button
-              size="xs"
-              variant="outline"
-              onClick={() =>
-                dispatch({
-                  type: 'UPDATE_PAGE_TYPE',
-                  id: pageType.id,
-                  patch: { status: 'confirmed' },
-                })
-              }
-              className="border-green-900 text-green-400 hover:bg-green-950/30"
-            >
-              Confirm
-            </Button>
+          <div className="flex flex-col gap-1.5 items-end">
+            <TrustRow origin={pageType.origin} review={pageType.review} />
+            <ReviewControls
+              review={pageType.review}
+              onChange={(reviewState, note) => {
+                actions.review('pageType', pageType.id, reviewState, note)
+                if (reviewState === 'confirmed') {
+                  dispatch({ type: 'UPDATE_PAGE_TYPE', id: pageType.id, patch: { status: 'confirmed' } })
+                }
+              }}
+            />
             <MergeMenu pageType={pageType} />
             <Button
               size="xs"
@@ -128,6 +125,12 @@ export function PageTypeEditor({ pageType }: Props) {
             </Button>
           </div>
         </div>
+        {pageType.origin?.reason && (
+          <p className="mt-3 text-[11px] text-gray-500">
+            <span className="text-gray-600">Origin: </span>
+            {pageType.origin.reason}
+          </p>
+        )}
       </Card>
 
       <Card size="sm" className="bg-gray-900 border-gray-800 px-5">
@@ -273,6 +276,14 @@ export function PageTypeEditor({ pageType }: Props) {
                 className="flex items-start justify-between gap-3 bg-gray-950 border border-gray-800 rounded px-3 py-2"
               >
                 <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5 mb-1.5">
+                    <OriginBadge origin={ev.origin} />
+                    <ReviewControls
+                      review={ev.review}
+                      compact
+                      onChange={(rs) => actions.review('event', ev.id, rs)}
+                    />
+                  </div>
                   <div className="flex items-center gap-2 mb-1">
                     <select
                       value={ev.kind}

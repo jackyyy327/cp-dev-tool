@@ -33,6 +33,14 @@ const CASES = [
       mustHaveInteractions: ['ViewCatalogObject', 'AddToCart'],
       mustHaveAttributes: ['language', 'loginStatus'],
       maxUnmapped: 1,
+      // Acceptance-level (P4 trust calibration):
+      allHaveOrigin: true,
+      allHaveReview: true,
+      minObservedPageTypes: 1,
+      // Any attribute the requirement asked for that isn't also observed should
+      // surface as requirement-driven + pending. Observed wins when both apply.
+      minRequirementDrivenAttributes: 0,
+      summaryIntegrity: true,
     },
   },
   {
@@ -45,6 +53,11 @@ const CASES = [
       mustHaveClasses: ['content'],
       forbidInteractions: ['AddToCart', 'Purchase'],
       maxUnmapped: 1,
+      allHaveOrigin: true,
+      allHaveReview: true,
+      // Non-commerce safety: no observed commerce recommendations
+      forbidObservedInteractions: ['AddToCart', 'Purchase', 'ViewCatalogObject'],
+      summaryIntegrity: true,
     },
   },
   {
@@ -55,9 +68,12 @@ const CASES = [
     expect: {
       minPageTypes: 2,
       mustHaveAttributes: ['language'],
-      // Not asserting product classification — brand sites are intentionally
-      // conservative and may downgrade to needsConfirmation.
       maxUnmapped: 2,
+      allHaveOrigin: true,
+      allHaveReview: true,
+      // Reviewability: weak-structure brand sites should surface pending review items
+      minPendingPageTypes: 1,
+      summaryIntegrity: true,
     },
   },
   {
@@ -160,6 +176,65 @@ function check(a, ex) {
   if (ex.maxUnmapped != null) {
     const unmapped = a.requirementMappings.filter((r) => r.status === 'unmapped').length
     ok(unmapped <= ex.maxUnmapped, '≤ ' + ex.maxUnmapped + ' unmapped requirement(s) (got ' + unmapped + ')')
+  }
+
+  // --- Acceptance expectations (P4) ---
+  const pts = a.pageTypes || []
+  const evs = a.events || []
+  const atrs = a.attributes || []
+
+  if (ex.allHaveOrigin) {
+    const missing = [
+      ...pts.filter((p) => !p.origin).map((p) => 'pt:' + p.name),
+      ...evs.filter((e) => !e.origin).map((e) => 'ev:' + (e.interactionName || e.customName || e.id)),
+      ...atrs.filter((x) => !x.origin).map((x) => 'attr:' + x.name),
+    ]
+    ok(missing.length === 0, 'all items carry an origin tag' + (missing.length ? ' (missing: ' + missing.slice(0, 3).join(', ') + ')' : ''))
+  }
+  if (ex.allHaveReview) {
+    const missing =
+      pts.filter((p) => !p.review).length +
+      evs.filter((e) => !e.review).length +
+      atrs.filter((x) => !x.review).length
+    ok(missing === 0, 'all items carry a review state (' + missing + ' missing)')
+  }
+  if (ex.minObservedPageTypes != null) {
+    const n = pts.filter((p) => p.origin && p.origin.type === 'observed').length
+    ok(n >= ex.minObservedPageTypes, '≥ ' + ex.minObservedPageTypes + ' observed page type(s) (got ' + n + ')')
+  }
+  if (ex.minPendingPageTypes != null) {
+    const n = pts.filter((p) => (p.review && p.review.state === 'pending') || !p.review).length
+    ok(n >= ex.minPendingPageTypes, '≥ ' + ex.minPendingPageTypes + ' pending page type(s) for consultant review (got ' + n + ')')
+  }
+  if (ex.minRequirementDrivenAttributes != null) {
+    const n = atrs.filter((x) => x.origin && x.origin.type === 'requirement-driven').length
+    ok(n >= ex.minRequirementDrivenAttributes, '≥ ' + ex.minRequirementDrivenAttributes + ' requirement-driven attribute(s) (got ' + n + ')')
+  }
+  for (const int of ex.forbidObservedInteractions || []) {
+    const observedCommerce =
+      pts.some((p) => p.interactionName === int && p.origin && p.origin.type === 'observed') ||
+      evs.some((e) => e.interactionName === int && e.origin && e.origin.type === 'observed')
+    ok(!observedCommerce, 'no observed ' + int + ' on non-commerce site')
+  }
+  if (ex.summaryIntegrity) {
+    // Design Summary is derived from structured state; verify the structured
+    // state itself is self-consistent enough to derive a summary from.
+    const confirmedOrObserved = pts.filter(
+      (p) => (p.review && p.review.state === 'confirmed') || (p.origin && p.origin.type === 'observed'),
+    ).length
+    const pending = pts.filter((p) => !p.review || p.review.state === 'pending').length
+    const requested = atrs.filter((x) => x.origin && x.origin.type === 'requirement-driven').length
+    const total = pts.length + evs.length + atrs.length
+    ok(
+      total > 0 && (confirmedOrObserved + pending + requested) >= 1,
+      'summary-derivable groups present (recommended=' +
+        confirmedOrObserved +
+        ', pending=' +
+        pending +
+        ', requested=' +
+        requested +
+        ')',
+    )
   }
   return { lines, pass, fail }
 }

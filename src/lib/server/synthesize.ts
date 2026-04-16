@@ -3,6 +3,7 @@ import type {
   EventDraft,
   Evidence,
   InteractionName,
+  Origin,
   PageTypeDraft,
 } from '@/types/analysis'
 import type { RawSample } from './sample-pages'
@@ -171,6 +172,11 @@ export function synthesize(samples: RawSample[]): SynthesizeOutput {
           pageTypeRefs: [id],
           objectRef: 'do_product',
           triggerHint: 'click on add-to-cart control',
+          origin: {
+            type: 'observed',
+            reason: 'Add-to-cart control detected in product page DOM',
+          },
+          review: { state: 'pending' },
         })
       }
     } else if (winner === 'category') {
@@ -215,10 +221,16 @@ export function synthesize(samples: RawSample[]): SynthesizeOutput {
           pageTypeRefs: [id],
           objectRef: 'do_order',
           triggerHint: 'order confirmation page load',
+          origin: {
+            type: 'observed',
+            reason: 'Checkout/order URL anchor matched with high confidence',
+          },
+          review: { state: 'pending' },
         })
       }
     }
 
+    const ptOrigin = originForClassification(winner, top, confidence, sigSet)
     pageTypes.push({
       id,
       name: nameFor(cluster.template, winner, first),
@@ -230,6 +242,8 @@ export function synthesize(samples: RawSample[]): SynthesizeOutput {
       confidence,
       status: 'suggested',
       evidenceRefs: evRefs,
+      origin: ptOrigin,
+      review: { state: confidence === 'high' ? 'confirmed' : 'pending' },
     })
   }
 
@@ -489,6 +503,50 @@ function humanClassName(c: Classification): string {
 function scoreDetail(c: Classification, s: ClassScore): string {
   if (s.hits.length === 0) return 'No class-specific signals observed.'
   return humanClassName(c) + ' signals: ' + s.hits.join(' + ')
+}
+
+// Observed: anchored by URL or JSON-LD — we have a concrete site fact.
+// Inferred: scoring/weak-anchor or fell through to "other" — analyzer's
+// aggregation, not a direct observation.
+function originForClassification(
+  winner: Classification,
+  top: ClassScore,
+  confidence: 'high' | 'medium' | 'low',
+  sigSet: Set<string>,
+): Origin {
+  if (winner === 'home') {
+    return { type: 'observed', reason: 'Entry URL is the site root' }
+  }
+  if (winner === 'other') {
+    return {
+      type: 'inferred',
+      reason: 'No class-specific signal combination reached the threshold',
+    }
+  }
+  const hasStructuredAnchor =
+    sigSet.has('jsonld:Product') ||
+    sigSet.has('jsonld:Collection') ||
+    sigSet.has('jsonld:Article') ||
+    sigSet.has('jsonld:SearchResults') ||
+    sigSet.has('og:type=product') ||
+    sigSet.has('og:type=article')
+  const hasUrlAnchor = top.hits.some((h) => h.startsWith('URL /'))
+  if (hasStructuredAnchor || hasUrlAnchor || confidence === 'high') {
+    return {
+      type: 'observed',
+      reason:
+        hasStructuredAnchor
+          ? 'Structured data anchor (' + top.hits.filter((h) => h.startsWith('jsonld')).join(', ') + ')'
+          : hasUrlAnchor
+          ? 'URL pattern anchor — ' + top.hits.filter((h) => h.startsWith('URL /')).join(', ')
+          : 'High-confidence multi-signal agreement',
+    }
+  }
+  return {
+    type: 'inferred',
+    reason:
+      'Classified by DOM signal aggregation without a URL or structured-data anchor',
+  }
 }
 
 function upsertEvent(events: EventDraft[], draft: EventDraft): void {

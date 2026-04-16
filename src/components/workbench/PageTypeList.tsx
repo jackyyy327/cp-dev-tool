@@ -4,6 +4,7 @@ import { useAnalysisStore } from '@/lib/analysis-store'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Plus, Check, Circle, Edit3 } from 'lucide-react'
+import { OriginBadge, ReviewBadge } from '@/components/trust/TrustBadges'
 
 export function PageTypeList() {
   const { state, dispatch } = useAnalysisStore()
@@ -46,6 +47,10 @@ export function PageTypeList() {
                   <StatusBadge status={pt.status} />
                 </div>
                 <div className="text-xs text-gray-500 truncate mt-0.5">{pt.isMatchHint}</div>
+                <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
+                  <OriginBadge origin={pt.origin} />
+                  <ReviewBadge review={pt.review} />
+                </div>
                 <div className="flex items-center gap-2 mt-1 text-[11px] text-gray-600">
                   <span>{pt.sampleUrls.length} sample{pt.sampleUrls.length === 1 ? '' : 's'}</span>
                   <span>·</span>

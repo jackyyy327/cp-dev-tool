@@ -7,6 +7,31 @@ export type Confidence = 'high' | 'medium' | 'low'
 
 export type PageTypeStatus = 'suggested' | 'confirmed' | 'edited'
 
+// P4 trust calibration: every candidate result carries an origin layer so the
+// consultant can distinguish what was observed on the site, what was inferred
+// by the analyzer, and what was proposed only because the requirement asked
+// for it. Origin is descriptive, not a quality score — a high-confidence
+// `observed` item and a low-confidence `requirement-driven` item are both
+// valid, they just sit in different columns of the review loop.
+export type OriginType = 'observed' | 'inferred' | 'requirement-driven'
+
+export interface Origin {
+  type: OriginType
+  reason: string
+  evidenceRefs?: string[]
+}
+
+// Consultant review state. Applies uniformly to page types, events, and
+// attribute candidates so the Design Summary and Pending queue can be
+// derived from a single signal.
+export type ReviewState = 'pending' | 'confirmed' | 'rejected'
+
+export interface Review {
+  state: ReviewState
+  note?: string
+  updatedAt?: number
+}
+
 // Salesforce Interactions namespace — item-level interactions on catalog objects.
 // Mirrors SalesforceInteractions.CatalogObjectInteractionName / CartInteractionName / OrderInteractionName.
 export type CatalogInteractionName =
@@ -65,6 +90,8 @@ export interface EventDraft {
   pageTypeRefs: string[]
   objectRef?: string
   triggerHint: string
+  origin?: Origin
+  review?: Review
 }
 
 export interface PageTypeDraft {
@@ -78,6 +105,8 @@ export interface PageTypeDraft {
   confidence: Confidence
   status: PageTypeStatus
   evidenceRefs: string[]
+  origin?: Origin
+  review?: Review
 }
 
 export type EvidenceKind =
@@ -152,6 +181,8 @@ export interface AttributeCandidate {
   consultantAction: string
   fromRequirement: boolean // true when driven by a requirement clause rather than crawl
   evidenceRefs: string[]
+  origin?: Origin
+  review?: Review
 }
 
 export interface RequirementMapping {

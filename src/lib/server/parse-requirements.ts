@@ -273,6 +273,11 @@ export function parseRequirements(
               'Confirm the runtime source and whether this should be tracked in sitemap vs. derived downstream',
             fromRequirement: true,
             evidenceRefs: [],
+            origin: {
+              type: 'requirement-driven',
+              reason: 'Proposed because the requirement mentioned it — not observed on site',
+            },
+            review: { state: 'pending' },
           }
           attributes.push(attr)
         }
@@ -294,6 +299,11 @@ export function parseRequirements(
             interactionName: intent.interaction,
             pageTypeRefs: [candidatePt.id],
             triggerHint: defaultTriggerFor(intent.interaction),
+            origin: {
+              type: 'requirement-driven',
+              reason: 'Synthesized because the requirement asked for it; not observed on site',
+            },
+            review: { state: 'pending' },
           }
           events.push(ev)
           newEvents.push(ev)

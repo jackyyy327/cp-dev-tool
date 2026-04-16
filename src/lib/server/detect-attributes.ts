@@ -37,6 +37,33 @@ export function detectAttributes(ctx: AttributeContext): DetectedAttributes {
   ctx.samples.forEach((s) => s.signals.forEach((sig) => allSignals.add(sig)))
 
   const push = (a: AttributeCandidate, ev?: Partial<Evidence>) => {
+    // Apply a default origin + review to every attribute candidate so downstream
+    // UI and summaries always have something to display. Callers can override
+    // before pushing if they have a better story.
+    if (!a.origin) {
+      a.origin = a.fromRequirement
+        ? {
+            type: 'requirement-driven',
+            reason: 'Requested by the requirement text; no crawl-time DOM signal corroborated it',
+          }
+        : a.sensitive
+        ? {
+            type: 'requirement-driven',
+            reason: 'Flagged by sensitive-topic policy — not auto-tracked regardless of signals',
+          }
+        : a.confidence === 'high'
+        ? {
+            type: 'observed',
+            reason: a.confidenceReason,
+          }
+        : {
+            type: 'inferred',
+            reason: a.confidenceReason,
+          }
+    }
+    if (!a.review) {
+      a.review = { state: a.status === 'excluded' ? 'rejected' : 'pending' }
+    }
     attributes.push(a)
     if (ev) {
       const e: Evidence = {

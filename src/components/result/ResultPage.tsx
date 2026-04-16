@@ -7,6 +7,13 @@ import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { codeFromAnalysis } from '@/lib/code-from-analysis'
 import { ArrowLeft, Copy, Check } from 'lucide-react'
+import { OriginBadge, ReviewBadge } from '@/components/trust/TrustBadges'
+import type {
+  AnalysisResult,
+  AttributeCandidate,
+  EventDraft,
+  PageTypeDraft,
+} from '@/types/analysis'
 
 type Tab = 'summary' | 'code' | 'notes'
 
@@ -83,6 +90,7 @@ function DesignSummary() {
   const analysis = useAnalysisStore().state.analysis!
   return (
     <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
+      <ConsultantSummaryCard analysis={analysis} />
       <Card size="sm" className="bg-gray-900 border-gray-800 px-5 lg:col-span-2">
         <h2 className="text-xs uppercase tracking-wide text-gray-500 font-medium">Page Types</h2>
         <table className="w-full text-xs">
@@ -93,7 +101,8 @@ function DesignSummary() {
               <th className="text-left font-normal pb-1">Interaction</th>
               <th className="text-left font-normal pb-1">Object</th>
               <th className="text-left font-normal pb-1">Events</th>
-              <th className="text-left font-normal pb-1">Status</th>
+              <th className="text-left font-normal pb-1">Origin</th>
+              <th className="text-left font-normal pb-1">Review</th>
             </tr>
           </thead>
           <tbody>
@@ -117,7 +126,8 @@ function DesignSummary() {
                           )
                           .join(', ')}
                   </td>
-                  <td className="py-2 capitalize text-gray-400">{pt.status}</td>
+                  <td className="py-2"><OriginBadge origin={pt.origin} /></td>
+                  <td className="py-2"><ReviewBadge review={pt.review} /></td>
                 </tr>
               )
             })}
@@ -160,10 +170,16 @@ function DesignSummary() {
           <ul className="space-y-2 text-xs">
             {analysis.events.map((e) => (
               <li key={e.id} className="border-t border-gray-800 pt-2 first:border-0 first:pt-0">
-                <div className="font-mono text-gray-300">
-                  {e.kind === 'interaction'
-                    ? `SalesforceInteractions.${e.interactionName}`
-                    : e.customName}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="font-mono text-gray-300 truncate">
+                    {e.kind === 'interaction'
+                      ? `SalesforceInteractions.${e.interactionName}`
+                      : e.customName}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <OriginBadge origin={e.origin} />
+                    <ReviewBadge review={e.review} />
+                  </div>
                 </div>
                 <div className="text-gray-600">{e.triggerHint}</div>
               </li>
@@ -218,6 +234,278 @@ function DesignSummary() {
       </Card>
     </div>
   )
+}
+
+function ConsultantSummaryCard({ analysis }: { analysis: AnalysisResult }) {
+  const groups = groupForSummary(analysis)
+  return (
+    <Card size="sm" className="bg-gray-900 border-gray-800 px-5 lg:col-span-2">
+      <div className="flex items-baseline justify-between">
+        <h2 className="text-sm text-white font-semibold">Consultant Summary</h2>
+        <span className="text-[11px] text-gray-500">
+          Tracking design working draft · derived from structured state
+        </span>
+      </div>
+      <p className="text-xs text-gray-500 mt-1">
+        Recommended items have either been confirmed by the consultant or are observed site facts
+        with high confidence. Pending items still need review. Requested items were proposed by
+        the requirement text and have no crawl-time evidence yet.
+      </p>
+
+      <div className="grid gap-4 mt-4 grid-cols-1 md:grid-cols-2">
+        <SummaryList
+          title="Recommended Page Types"
+          items={groups.recommendedPts.map((pt) => ({
+            id: pt.id,
+            label: pt.name,
+            meta: pt.interactionName,
+            origin: pt.origin,
+            review: pt.review,
+          }))}
+          emptyLabel="No page types ready yet."
+        />
+        <SummaryList
+          title="Recommended Interactions"
+          items={groups.recommendedEvents.map((e) => ({
+            id: e.id,
+            label: e.kind === 'interaction' ? e.interactionName ?? 'interaction' : e.customName ?? 'event',
+            meta: e.triggerHint,
+            origin: e.origin,
+            review: e.review,
+          }))}
+          emptyLabel="No interactions ready yet."
+        />
+        <SummaryList
+          title="Recommended User Attributes"
+          items={groups.recommendedAttrs.map((a) => ({
+            id: a.id,
+            label: a.name,
+            meta: a.category + ' · ' + a.proposedSource,
+            origin: a.origin,
+            review: a.review,
+          }))}
+          emptyLabel="No attributes ready yet."
+        />
+        <SummaryList
+          title="Pending Review"
+          items={groups.pending.map((it) => ({
+            id: it.id,
+            label: it.label,
+            meta: it.meta,
+            origin: it.origin,
+            review: it.review,
+          }))}
+          emptyLabel="Nothing pending."
+        />
+        <SummaryList
+          title="Requirement-Driven Candidates"
+          items={groups.requested.map((it) => ({
+            id: it.id,
+            label: it.label,
+            meta: it.meta,
+            origin: it.origin,
+            review: it.review,
+          }))}
+          emptyLabel="No requirement-driven items."
+        />
+        <SummaryList
+          title="Exclusions & Sensitive Items"
+          items={groups.exclusions.map((a) => ({
+            id: a.id,
+            label: a.name,
+            meta: a.consultantAction,
+            origin: a.origin,
+            review: a.review,
+          }))}
+          emptyLabel="No exclusions."
+        />
+      </div>
+
+      {groups.notes.length > 0 && (
+        <div className="mt-4 pt-3 border-t border-gray-800">
+          <h3 className="text-[11px] uppercase tracking-wide text-gray-500 mb-1">
+            Consultant Notes
+          </h3>
+          <ul className="text-xs text-gray-400 list-disc pl-4 space-y-0.5">
+            {groups.notes.map((n, i) => (
+              <li key={i}>{n}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </Card>
+  )
+}
+
+interface SummaryItem {
+  id: string
+  label: string
+  meta?: string
+  origin?: PageTypeDraft['origin']
+  review?: PageTypeDraft['review']
+}
+
+function SummaryList({
+  title,
+  items,
+  emptyLabel,
+}: {
+  title: string
+  items: SummaryItem[]
+  emptyLabel: string
+}) {
+  return (
+    <div className="bg-gray-950/60 border border-gray-800 rounded p-3">
+      <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-2">{title}</div>
+      {items.length === 0 ? (
+        <p className="text-xs text-gray-600">{emptyLabel}</p>
+      ) : (
+        <ul className="space-y-1.5">
+          {items.map((it) => (
+            <li key={it.id} className="text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-gray-100 font-medium truncate">{it.label}</span>
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  <OriginBadge origin={it.origin} />
+                  <ReviewBadge review={it.review} />
+                </div>
+              </div>
+              {it.meta && <div className="text-gray-600 truncate">{it.meta}</div>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+type FlatItem = {
+  id: string
+  label: string
+  meta?: string
+  origin?: PageTypeDraft['origin']
+  review?: PageTypeDraft['review']
+}
+
+function groupForSummary(analysis: AnalysisResult): {
+  recommendedPts: PageTypeDraft[]
+  recommendedEvents: EventDraft[]
+  recommendedAttrs: AttributeCandidate[]
+  pending: FlatItem[]
+  requested: FlatItem[]
+  exclusions: AttributeCandidate[]
+  notes: string[]
+} {
+  const isRecommended = (r?: { state?: string }, origin?: { type?: string }) =>
+    r?.state === 'confirmed' ||
+    (origin?.type === 'observed' && r?.state !== 'rejected' && r?.state !== 'pending')
+  const isPending = (r?: { state?: string }) => (r?.state ?? 'pending') === 'pending'
+  const isRequested = (origin?: { type?: string }) => origin?.type === 'requirement-driven'
+
+  const recommendedPts = analysis.pageTypes.filter(
+    (pt) => isRecommended(pt.review, pt.origin) && pt.review?.state !== 'rejected',
+  )
+  const recommendedEvents = analysis.events.filter(
+    (e) => isRecommended(e.review, e.origin) && e.review?.state !== 'rejected',
+  )
+  const recommendedAttrs = analysis.attributes.filter(
+    (a) =>
+      a.status !== 'excluded' &&
+      isRecommended(a.review, a.origin) &&
+      a.review?.state !== 'rejected',
+  )
+
+  const pending: FlatItem[] = []
+  for (const pt of analysis.pageTypes) {
+    if (isPending(pt.review) && !isRequested(pt.origin)) {
+      pending.push({
+        id: pt.id,
+        label: pt.name,
+        meta: pt.interactionName,
+        origin: pt.origin,
+        review: pt.review,
+      })
+    }
+  }
+  for (const e of analysis.events) {
+    if (isPending(e.review) && !isRequested(e.origin)) {
+      pending.push({
+        id: e.id,
+        label:
+          e.kind === 'interaction'
+            ? e.interactionName ?? 'interaction'
+            : e.customName ?? 'event',
+        meta: e.triggerHint,
+        origin: e.origin,
+        review: e.review,
+      })
+    }
+  }
+  for (const a of analysis.attributes) {
+    if (a.status === 'excluded') continue
+    if (isPending(a.review) && !isRequested(a.origin)) {
+      pending.push({
+        id: a.id,
+        label: a.name,
+        meta: a.category + ' · ' + a.proposedSource,
+        origin: a.origin,
+        review: a.review,
+      })
+    }
+  }
+
+  const requested: FlatItem[] = []
+  for (const pt of analysis.pageTypes) {
+    if (isRequested(pt.origin) && pt.review?.state !== 'confirmed') {
+      requested.push({
+        id: pt.id,
+        label: pt.name,
+        meta: pt.interactionName,
+        origin: pt.origin,
+        review: pt.review,
+      })
+    }
+  }
+  for (const e of analysis.events) {
+    if (isRequested(e.origin) && e.review?.state !== 'confirmed') {
+      requested.push({
+        id: e.id,
+        label:
+          e.kind === 'interaction'
+            ? e.interactionName ?? 'interaction'
+            : e.customName ?? 'event',
+        meta: e.triggerHint,
+        origin: e.origin,
+        review: e.review,
+      })
+    }
+  }
+  for (const a of analysis.attributes) {
+    if (a.status === 'excluded') continue
+    if (isRequested(a.origin) && a.review?.state !== 'confirmed') {
+      requested.push({
+        id: a.id,
+        label: a.name,
+        meta: a.category + ' · ' + a.proposedSource,
+        origin: a.origin,
+        review: a.review,
+      })
+    }
+  }
+
+  const exclusions = analysis.attributes.filter(
+    (a) => a.status === 'excluded' || a.review?.state === 'rejected',
+  )
+
+  return {
+    recommendedPts,
+    recommendedEvents,
+    recommendedAttrs,
+    pending,
+    requested,
+    exclusions,
+    notes: analysis.assumptions,
+  }
 }
 
 function SitemapCode({ code }: { code: string }) {

@@ -15,7 +15,10 @@ import type {
   PageTypeDraft,
   Phase,
   RequirementInput,
+  ReviewState,
 } from '@/types/analysis'
+
+type ReviewTargetKind = 'pageType' | 'event' | 'attribute'
 
 interface State {
   phase: Phase
@@ -45,6 +48,7 @@ type Action =
   | { type: 'REMOVE_EVENT'; id: string }
   | { type: 'CONFIRM_PENDING'; id: string }
   | { type: 'DISMISS_PENDING'; id: string }
+  | { type: 'REVIEW'; target: ReviewTargetKind; id: string; state: ReviewState; note?: string }
   | { type: 'RESET' }
 
 const initialState: State = {
@@ -218,6 +222,30 @@ function reducer(state: State, action: Action): State {
         ...a,
         pendingConfirmations: a.pendingConfirmations.filter((p) => p.id !== action.id),
       }))
+    case 'REVIEW':
+      return mapAnalysis(state, (a) => {
+        const review = { state: action.state, note: action.note, updatedAt: Date.now() }
+        if (action.target === 'pageType') {
+          return {
+            ...a,
+            pageTypes: a.pageTypes.map((pt) =>
+              pt.id === action.id ? { ...pt, review } : pt,
+            ),
+          }
+        }
+        if (action.target === 'event') {
+          return {
+            ...a,
+            events: a.events.map((e) => (e.id === action.id ? { ...e, review } : e)),
+          }
+        }
+        return {
+          ...a,
+          attributes: a.attributes.map((attr) =>
+            attr.id === action.id ? { ...attr, review } : attr,
+          ),
+        }
+      })
     case 'RESET':
       return initialState
     default:
@@ -235,10 +263,12 @@ interface StoreContext {
   actions: {
     startAnalysis: (siteUrl: string, requirement: RequirementInput) => void
     finishLoading: (analysis: AnalysisResult) => void
+    failLoading: (error: string, kind?: FailureKind) => void
     goToWorkbench: () => void
     goToResult: () => void
     backToInput: () => void
     backToWorkbench: () => void
+    review: (target: ReviewTargetKind, id: string, state: ReviewState, note?: string) => void
   }
 }
 
@@ -264,6 +294,8 @@ export function AnalysisStoreProvider({ children }: { children: ReactNode }) {
       goToResult: () => dispatch({ type: 'SET_PHASE', phase: 'result' }),
       backToInput: () => dispatch({ type: 'RESET' }),
       backToWorkbench: () => dispatch({ type: 'SET_PHASE', phase: 'workbench' }),
+      review: (target: ReviewTargetKind, id: string, reviewState: ReviewState, note?: string) =>
+        dispatch({ type: 'REVIEW', target, id, state: reviewState, note }),
     }),
     [],
   )
