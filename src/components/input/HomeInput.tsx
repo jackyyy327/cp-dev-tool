@@ -80,7 +80,9 @@ export function HomeInput() {
           <span className="font-semibold text-xl tracking-tight">
             Salesforce Personalization Workbench
           </span>
-          <span className="text-gray-500 text-sm">By DentsuDigital</span>
+          <span className="ml-1 text-[11px] font-semibold tracking-widest uppercase text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-violet-400 border border-blue-500/30 rounded px-2 py-0.5">
+            by DentsuDigital
+          </span>
         </div>
       </header>
 
