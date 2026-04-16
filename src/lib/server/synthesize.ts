@@ -383,10 +383,11 @@ function scoreClasses(
     ].filter(Boolean).length >= 2
   const hasTerminalBreadcrumb = has('breadcrumb nav') || has('jsonld:Breadcrumb')
   const weakProductAnchor = isLeaf && hasProductCombo && hasTerminalBreadcrumb
+  const listingSuffix = /[_-](list|index|all|archive|search|category|results|ranking|recommend)/i.test(t)
   const productAnchor =
     has('jsonld:Product') ||
     has('og:type=product') ||
-    urlIs(/\/(products?|p|item|dp|goods|商品|shouhin)(?![a-zA-Z0-9])/) ||
+    (urlIs(/\/(products?|p|item|dp|goods|商品|shouhin)(?![a-zA-Z0-9])/) && !listingSuffix) ||
     weakProductAnchor
   const categoryAnchor =
     has('jsonld:Collection') ||
@@ -409,7 +410,7 @@ function scoreClasses(
         pts: 1,
         h: 'add-to-cart control',
       },
-      urlIs(/\/(products?|p|item|dp|goods)(?![a-zA-Z0-9])/) && { pts: 3, h: 'URL /' + first + '/' },
+      urlIs(/\/(products?|p|item|dp|goods)(?![a-zA-Z0-9])/) && !listingSuffix && { pts: 3, h: 'URL /' + first + '/' },
       (has('visible price') || has('visible price (JA)')) && { pts: 1, h: 'visible price' },
       has('product gallery') && { pts: 2, h: 'product gallery' },
       has('product spec block') && { pts: 2, h: 'product spec block' },
@@ -679,8 +680,9 @@ function pathTemplate(path: string): string {
     segs
       .map((s, i) => {
         if (i === 0) return s
-        if (/^\d+$/.test(s)) return ':id'
-        if (/^[a-z0-9][a-z0-9-]{3,}$/i.test(s)) return ':slug'
+        const base = s.replace(/\.(html?|php|aspx?|jsp)$/i, '')
+        if (/^\d+$/.test(base)) return ':id'
+        if (/^[a-z0-9][a-z0-9-]{3,}$/i.test(base)) return ':slug'
         return s
       })
       .join('/')

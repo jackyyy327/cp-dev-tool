@@ -74,15 +74,27 @@ export async function samplePages(entryUrl: string, maxPages = 8): Promise<RawSa
     links.push(...seeds)
   }
 
-  // Diversify picks by first path segment
+  // Diversify picks by first path segment, prioritizing commerce-critical paths
+  // so product/item pages are always sampled when available.
   const byFirst = new Map<string, string[]>()
   for (const p of links) {
     const first = p.split('/').filter(Boolean)[0]?.split('?')[0] ?? ''
     if (!byFirst.has(first)) byFirst.set(first, [])
     byFirst.get(first)!.push(p)
   }
+  const segPriority = (seg: string): number => {
+    const s = seg.toLowerCase().replace(/\.(html?|php|aspx?)$/, '')
+    if (/^(product|products|item|items|goods|detail|shop|pdp)/.test(s)) return 0
+    if (/^(category|categories|collections|catalog)/.test(s)) return 1
+    if (/^(cart|checkout|order|purchase)/.test(s)) return 2
+    if (/^(login|signin|signup|register|account|member)/.test(s)) return 3
+    return 4
+  }
+  const sortedGroups = [...byFirst.entries()].sort(
+    (a, b) => segPriority(a[0]) - segPriority(b[0]),
+  )
   const picks: string[] = []
-  for (const group of byFirst.values()) {
+  for (const [, group] of sortedGroups) {
     picks.push(...group.slice(0, 2))
     if (picks.length >= maxPages - samples.length) break
   }
