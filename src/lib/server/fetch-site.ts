@@ -71,7 +71,12 @@ export async function fetchPage(url: string, timeoutMs = 8000): Promise<FetchedP
     if (err instanceof FetchError) throw err
     const e = err as Error
     if (e.name === 'AbortError') {
-      throw new FetchError('UrlFetchFailure', 'Request timed out after ' + timeoutMs + 'ms (' + url + ')')
+      throw new FetchError(
+        'UrlFetchFailure',
+        'Request timed out after ' + timeoutMs + 'ms (' + url + '). ' +
+          'The site may be blocking server-side requests via WAF/anti-bot protection (Akamai, Cloudflare, etc.). ' +
+          'Try providing specific page URLs or a sitemap instead.',
+      )
     }
     throw new FetchError('UrlFetchFailure', 'Network error fetching ' + url + ': ' + e.message)
   } finally {

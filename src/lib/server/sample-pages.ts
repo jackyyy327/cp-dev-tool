@@ -41,12 +41,14 @@ export async function samplePages(entryUrl: string, maxPages = 8): Promise<RawSa
   const visited = new Set<string>()
 
   // Fetch the entry URL (user-provided path, not always '/')
-  const entry = await fetchOneSample(origin, entryPath, visited)
+  // Use a longer timeout for entry pages — some sites behind WAFs (Akamai, etc.)
+  // are slow to respond on first request.
+  const entry = await fetchOneSample(origin, entryPath, visited, 12000)
   if (entry) samples.push(entry)
 
   // If user gave a subpath, also fetch root '/' for broader link discovery
   if (entryPath !== '/') {
-    const root = await fetchOneSample(origin, '/', visited)
+    const root = await fetchOneSample(origin, '/', visited, 12000)
     if (root) samples.push(root)
   }
 
@@ -96,11 +98,12 @@ async function fetchOneSample(
   origin: string,
   path: string,
   visited: Set<string>,
+  timeoutMs = 6000,
 ): Promise<RawSample | null> {
   if (visited.has(path)) return null
   visited.add(path)
   try {
-    const page = await fetchPage(origin + path, 6000)
+    const page = await fetchPage(origin + path, timeoutMs)
     const hits = collectSignalHits(page.html)
     return {
       url: path,
