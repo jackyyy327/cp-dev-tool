@@ -84,6 +84,49 @@ const CASES = [
   },
 ]
 
+// ——— Unit checks for bot-page detection ———
+// These run in-process without hitting the dev server, so they validate
+// the detection heuristics directly and serve as a regression net for
+// false positives (real pages mistakenly flagged as bot pages).
+
+const BOT_PAGE_CASES = [
+  {
+    name: 'Akamai ESI failover',
+    html: '<html><head><title>Hang Tight! Routing to checkout...</title></head><body onload=""><esi:remove><!-- bot failover --></esi:remove><p>Please wait while we verify your request.</p><a href="mailto:support@example.com">Contact us</a></body></html>',
+    expected: true,
+  },
+  {
+    name: 'Cloudflare challenge (no links)',
+    html: '<html><head><title>Just a moment...</title></head><body><div id="cf-browser-verification">Checking your browser</div><script src="https://challenges.cloudflare.com/cdn-cgi/challenge-platform/scripts/turnstile/managed/challenge.js"></script></body></html>',
+    expected: true,
+  },
+  {
+    name: 'PerimeterX captcha',
+    html: '<html><head><title>Press & Hold</title></head><body><div id="px-captcha"></div><script src="/perimeterx/captcha.js"></script></body></html>',
+    expected: true,
+  },
+  {
+    name: 'Zero-link text page',
+    html: '<html><head><title>Verification</title></head><body><p>' + 'Please verify you are human. '.repeat(15) + '</p></body></html>',
+    expected: true,
+  },
+  {
+    name: 'Real ecommerce page (should NOT trigger)',
+    html: '<html><head><title>Shop - Example Store</title></head><body><nav><a href="/products">Products</a><a href="/cart">Cart</a><a href="/about">About</a></nav><main><div class="product-grid"><a href="/products/1">Product 1</a><a href="/products/2">Product 2</a></div></main></body></html>',
+    expected: false,
+  },
+  {
+    name: 'Real page with Cloudflare Turnstile widget (should NOT trigger)',
+    html: '<html><head><title>TechCrunch | News</title></head><body><nav><a href="/news">News</a><a href="/about">About</a></nav><article><p>Article content here.</p></article><script src="https://challenges.cloudflare.com/turnstile/v0/api.js" defer></script></body></html>',
+    expected: false,
+  },
+  {
+    name: 'Minimal page with links (should NOT trigger)',
+    html: '<html><head><title>Home</title></head><body><a href="/page1">Link 1</a></body></html>',
+    expected: false,
+  },
+]
+
 async function run() {
   let pass = 0
   let fail = 0
@@ -131,8 +174,7 @@ async function run() {
         body.pageTypes.map((p) => p.name + '[' + p.confidence + ']').join(', '),
     )
   }
-  console.log('\n' + pass + ' pass / ' + fail + ' fail')
-  process.exit(fail === 0 ? 0 : 1)
+  return { pass, fail }
 }
 
 function check(a, ex) {
@@ -239,7 +281,52 @@ function check(a, ex) {
   return { lines, pass, fail }
 }
 
-run().catch((e) => {
+// Inline bot-page detection (mirrors fetch-site.ts looksLikeBotPage)
+function looksLikeBotPage(html) {
+  if (/<esi:(remove|vars|comment)\b/i.test(html)) return true
+  if (/botfailover|bot[-_\s]?fail/i.test(html)) return true
+  const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i)
+  const title = (titleMatch?.[1] ?? '').trim().toLowerCase()
+  const botTitles = ['hang tight','just a moment','checking your browser','please wait','one moment','access denied','attention required','please verify']
+  if (botTitles.some((t) => title.includes(t))) return true
+  const linkCount = (html.match(/<a\b[^>]*\bhref=["'](?!mailto:|javascript:|#)[^"']+["']/gi) ?? []).length
+  if (/cf-browser-verification|cf_chl_opt/i.test(html)) return true
+  if (/challenges\.cloudflare\.com/i.test(html) && linkCount === 0) return true
+  if (/perimeterx|_pxhd|px-captcha/i.test(html)) return true
+  if (linkCount === 0) {
+    const bodyMatch = html.match(/<body[\s\S]*?<\/body>/i)
+    const body = bodyMatch ? bodyMatch[0] : html
+    const stripped = body.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<[^>]+>/g, ' ')
+    const text = stripped.replace(/\s+/g, ' ').trim()
+    if (text.length > 200 && text.length < 5000) return true
+  }
+  return false
+}
+
+async function runBotPageChecks() {
+  let pass = 0
+  let fail = 0
+  process.stdout.write('\n▸ bot-page detection unit checks\n')
+  for (const c of BOT_PAGE_CASES) {
+    const result = looksLikeBotPage(c.html)
+    const ok = result === c.expected
+    console.log('  ' + (ok ? '✓' : '✗') + ' ' + c.name + (ok ? '' : ' (got ' + result + ', expected ' + c.expected + ')'))
+    if (ok) pass++
+    else fail++
+  }
+  return { pass, fail }
+}
+
+async function main() {
+  const apiResults = await run()
+  const botResults = await runBotPageChecks()
+  const totalPass = apiResults.pass + botResults.pass
+  const totalFail = apiResults.fail + botResults.fail
+  console.log('\n' + totalPass + ' pass / ' + totalFail + ' fail')
+  process.exit(totalFail === 0 ? 0 : 1)
+}
+
+main().catch((e) => {
   console.error(e)
   process.exit(2)
 })
