@@ -78,21 +78,30 @@ export async function POST(req: NextRequest) {
 
   if (!res.ok) {
     const text = await res.text()
-    console.error('[polish] openai error', res.status, text.slice(0, 400))
+    console.error('[polish] openai error', { status: res.status, body: text })
     return NextResponse.json(
       { error: 'OpenAI returned ' + res.status, detail: text.slice(0, 400) },
       { status: 502 },
     )
   }
 
-  const json = (await res.json()) as {
-    choices?: Array<{ message?: { content?: string } }>
+  const rawBody = await res.text()
+  let json: { choices?: Array<{ message?: { content?: string } }> }
+  try {
+    json = JSON.parse(rawBody)
+  } catch {
+    console.error('[polish] openai returned non-JSON envelope', { body: rawBody })
+    return NextResponse.json(
+      { error: 'OpenAI response envelope was not valid JSON', raw: rawBody.slice(0, 400) },
+      { status: 502 },
+    )
   }
   const content = json.choices?.[0]?.message?.content ?? ''
   let parsed: { requirements?: string; constraints?: string } = {}
   try {
     parsed = JSON.parse(content)
   } catch {
+    console.error('[polish] openai content was not valid JSON', { content })
     return NextResponse.json(
       { error: 'OpenAI response was not valid JSON', raw: content.slice(0, 400) },
       { status: 502 },
