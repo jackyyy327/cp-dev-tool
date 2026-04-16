@@ -58,7 +58,15 @@ export async function samplePages(entryUrl: string, maxPages = 8): Promise<RawSa
   }
   links = [...new Set(links)]
 
-  // If we got very few links from HTML, inject heuristic seed paths
+  // If HTML links are sparse, try sitemap and robots.txt discovery
+  if (links.length < 3) {
+    const sitemapLinks = await discoverFromSitemap(origin)
+    for (const p of sitemapLinks) {
+      if (!visited.has(p) && !links.includes(p)) links.push(p)
+    }
+  }
+
+  // If still very few links, inject heuristic seed paths
   if (links.length < 3) {
     const seeds = SEED_PATHS.filter((p) => !visited.has(p) && !links.includes(p))
     links.push(...seeds)
@@ -110,6 +118,95 @@ async function fetchOneSample(
     }
     return null
   }
+}
+
+// ——— sitemap / robots.txt discovery ———
+
+async function discoverFromSitemap(origin: string): Promise<string[]> {
+  const sitemapUrls = await findSitemapUrls(origin)
+  const paths: string[] = []
+
+  for (const sitemapUrl of sitemapUrls.slice(0, 3)) {
+    try {
+      const res = await fetch(sitemapUrl, {
+        headers: { 'user-agent': 'Mozilla/5.0 (compatible; SitemapCrawler)' },
+        signal: AbortSignal.timeout(5000),
+      })
+      if (!res.ok) continue
+      const xml = await res.text()
+      const extracted = extractSitemapPaths(xml, origin)
+      for (const p of extracted) {
+        if (!paths.includes(p)) paths.push(p)
+      }
+    } catch {
+      // sitemap not available — continue
+    }
+  }
+
+  return diversifySitemapPaths(paths)
+}
+
+async function findSitemapUrls(origin: string): Promise<string[]> {
+  const urls = [origin + '/sitemap.xml', origin + '/sitemap_index.xml']
+
+  // Parse robots.txt for Sitemap: directives
+  try {
+    const res = await fetch(origin + '/robots.txt', {
+      headers: { 'user-agent': 'Mozilla/5.0 (compatible; SitemapCrawler)' },
+      signal: AbortSignal.timeout(3000),
+    })
+    if (res.ok) {
+      const text = await res.text()
+      const re = /^Sitemap:\s*(.+)$/gim
+      let m: RegExpExecArray | null
+      while ((m = re.exec(text)) !== null) {
+        const url = m[1].trim()
+        if (url && !urls.includes(url)) urls.push(url)
+      }
+    }
+  } catch {
+    // robots.txt not available
+  }
+
+  return urls
+}
+
+function extractSitemapPaths(xml: string, origin: string): string[] {
+  const paths: string[] = []
+  // Match <loc> tags in both sitemap and sitemap index files
+  const re = /<loc>\s*(https?:\/\/[^<]+)\s*<\/loc>/gi
+  let m: RegExpExecArray | null
+  while ((m = re.exec(xml)) !== null) {
+    const url = m[1].trim()
+    // If it's a sub-sitemap URL, skip (we already handle top-level sitemaps)
+    if (/sitemap.*\.xml/i.test(url)) continue
+    try {
+      const parsed = new URL(url)
+      if (parsed.origin !== origin) continue
+      let pathname = parsed.pathname.replace(/\/+$/, '')
+      if (pathname === '' || pathname === '/') continue
+      if (/\.(pdf|jpe?g|png|gif|webp|svg|css|js|xml|json|zip|mp4|woff2?|ico)$/i.test(pathname)) continue
+      paths.push(pathname)
+    } catch {
+      // invalid URL
+    }
+  }
+  return paths
+}
+
+function diversifySitemapPaths(paths: string[], maxPer = 2, maxTotal = 14): string[] {
+  const byFirst = new Map<string, string[]>()
+  for (const p of paths) {
+    const first = p.split('/').filter(Boolean)[0]?.split('?')[0] ?? ''
+    if (!byFirst.has(first)) byFirst.set(first, [])
+    byFirst.get(first)!.push(p)
+  }
+  const picks: string[] = []
+  for (const group of byFirst.values()) {
+    picks.push(...group.slice(0, maxPer))
+    if (picks.length >= maxTotal) break
+  }
+  return picks.slice(0, maxTotal)
 }
 
 // ——— signal detection ———

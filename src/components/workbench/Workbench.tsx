@@ -7,7 +7,7 @@ import { PageTypeEditor } from './PageTypeEditor'
 import { EvidencePane } from './EvidencePane'
 import { DecisionsPanel } from './DecisionsPanel'
 import { OriginBadge, ReviewControls } from '@/components/trust/TrustBadges'
-import { ArrowLeft, ArrowRight, ExternalLink } from 'lucide-react'
+import { ArrowLeft, ArrowRight, ExternalLink, AlertTriangle } from 'lucide-react'
 import type { EvidenceLocation } from '@/types/analysis'
 
 export function Workbench() {
@@ -51,6 +51,7 @@ export function Workbench() {
       </header>
 
       <main className="flex-1 max-w-screen-2xl w-full mx-auto px-6 py-6 flex flex-col gap-4">
+        <PartialDiscoveryBanner />
         <div className="grid gap-4 grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)_320px]">
           <PageTypeList />
           <PageTypeEditor pageType={selected} />
@@ -178,6 +179,22 @@ function AttributeLocations({
         </li>
       ))}
     </ul>
+  )
+}
+
+function PartialDiscoveryBanner() {
+  const { state } = useAnalysisStore()
+  const sampleCount = state.analysis?.site.sampledPages.length ?? 0
+  if (sampleCount >= 3) return null
+  return (
+    <div className="flex items-start gap-3 rounded-lg border border-amber-800/60 bg-amber-950/30 px-4 py-3">
+      <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+      <div className="text-sm text-amber-200">
+        <span className="font-medium">Limited discovery:</span> only {sampleCount} page(s) were
+        reachable from the entry point. These results may not represent the full site structure.
+        Try providing a different entry URL or adding page URLs manually.
+      </div>
+    </div>
   )
 }
 
