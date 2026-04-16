@@ -26,6 +26,7 @@ interface Intent {
     | 'attribute_affinity'
     | 'attribute_consent'
     | 'exclude'
+    | 'capture_identity'
     | 'generic_track'
   interaction?:
     | 'ViewCatalogObject'
@@ -35,7 +36,7 @@ interface Intent {
     | 'Purchase'
     | 'ViewCart'
   objectTypes: Array<'Product' | 'Category' | 'Cart' | 'Order' | 'Search'>
-  pageClassHint?: 'product' | 'category' | 'search' | 'cart' | 'checkout' | 'content' | 'home'
+  pageClassHint?: 'product' | 'category' | 'search' | 'cart' | 'checkout' | 'content' | 'home' | 'login'
   attributeBinding?: string // attribute name, e.g. 'language'
   mayCreateEvent?: boolean // if true and no event matches, synthesize a candidate
 }
@@ -60,7 +61,7 @@ const TEMPLATES: Array<{ pattern: RegExp; intent: Intent }> = [
   // ——— page/event intents ———
   {
     pattern:
-      /\b(product\s*(detail|page|view|impression|interaction)|pdp|view\s*(a\s*)?product|product\s*view|view\s*item|browse\s*products?)\b/,
+      /\b(product\s*(detail|page|views?|impressions?|interaction)|pdp|view\s*(a\s*)?products?|product\s*views?|view\s*items?|browse\s*products?|track\s*products?)\b/i,
     intent: {
       id: 'view_product',
       interaction: 'ViewCatalogObject',
@@ -152,6 +153,24 @@ const TEMPLATES: Array<{ pattern: RegExp; intent: Intent }> = [
   {
     pattern: /\b(consent|opt[\s-]?in|opt[\s-]?out|gdpr|ccpa|privacy\s*preference)\b/,
     intent: { id: 'attribute_consent', objectTypes: [], attributeBinding: 'consentStatus' },
+  },
+  {
+    pattern: /\b(capture|collect|track|resolve)\s*(user\s*)?(identity|identities|email|login|sign[\s-]?in)\b/i,
+    intent: {
+      id: 'capture_identity',
+      objectTypes: [],
+      pageClassHint: 'login',
+      mayCreateEvent: true,
+    },
+  },
+  {
+    pattern: /\b(user\s*identity|identity\s*(mapping|resolution|capture)|identify\s*(user|visitor)s?)\b/i,
+    intent: {
+      id: 'capture_identity',
+      objectTypes: [],
+      pageClassHint: 'login',
+      mayCreateEvent: true,
+    },
   },
   {
     pattern: /\b(enrich|capture|update|track).*(profile|user|visitor|attribute)s?\b/,
@@ -314,6 +333,25 @@ export function parseRequirements(
             pageTypeRef: candidatePt?.id ?? ev.pageTypeRefs[0],
             objectRef: ev.objectRef,
           })
+          continue
+        }
+      }
+
+      // Identity capture intent — bind to existing login/identity events
+      if (intent.id === 'capture_identity') {
+        const loginEv = events.find(
+          (e) => e.customName === 'Logged In' || e.customName === 'Login',
+        )
+        if (loginEv) {
+          targets.push({
+            eventRef: loginEv.id,
+            pageTypeRef: candidatePt?.id ?? loginEv.pageTypeRefs[0],
+          })
+          continue
+        }
+        const loginAttr = attributes.find((a) => a.name === 'loginStatus')
+        if (loginAttr) {
+          targets.push({ attributeRef: loginAttr.id, pageTypeRef: candidatePt?.id })
           continue
         }
       }

@@ -339,7 +339,17 @@ function compileIsMatch(hint: string): string {
 
 function selectorFromHint(hint: string): string {
   const match = hint.match(/(button[.#\w-]+|[.#][\w-]+)/)
-  return match ? match[1] : hint
+  if (match) return match[1]
+  const lower = hint.toLowerCase()
+  if (lower.includes('add-to-cart') || lower.includes('add to cart'))
+    return '.add-to-cart, [data-action="add-to-cart"]'
+  if (lower.includes('login') || lower.includes('sign-in') || lower.includes('sign in'))
+    return 'form[name="login-form"] button[type="submit"], .login-form button[type="submit"]'
+  if (lower.includes('checkout'))
+    return '.checkout-button, [data-action="checkout"]'
+  if (lower.includes('submit'))
+    return 'button[type="submit"]'
+  return hint
 }
 
 function safeDomain(url: string): string {
