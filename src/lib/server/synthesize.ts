@@ -424,12 +424,21 @@ function scoreClasses(
     ),
   )
 
-  const content = addScore(
-    has('jsonld:Article') && { pts: 5, h: 'jsonld:Article' },
-    has('og:type=article') && { pts: 4, h: 'og:type=article' },
-    has('article tag') && { pts: 2, h: '<article> element' },
-    has('datetime meta') && { pts: 2, h: '<time datetime>' },
-    has('author byline') && { pts: 2, h: 'author byline' },
+  // Corporate / utility URL patterns: the <article> HTML element is used
+  // structurally on many corporate and JP sites, so suppress content
+  // classification when the URL clearly indicates a non-editorial page type.
+  const corporateUrl = /\/(contact|inquiry|services?|solutions?|seminar|events?|webinar|careers?|recruit|company|corporate|about|privacy|terms|legal|faq|help|support|ir|csr|sustainability)\b/i
+  const contentAnchor = !corporateUrl.test(t)
+
+  const content = gate(
+    contentAnchor,
+    addScore(
+      has('jsonld:Article') && { pts: 5, h: 'jsonld:Article' },
+      has('og:type=article') && { pts: 4, h: 'og:type=article' },
+      has('article tag') && { pts: 2, h: '<article> element' },
+      has('datetime meta') && { pts: 2, h: '<time datetime>' },
+      has('author byline') && { pts: 2, h: 'author byline' },
+    ),
   )
 
   const home: ScoreBreakdown =
@@ -635,6 +644,43 @@ function pathTemplate(path: string): string {
   )
 }
 
+const CORPORATE_LABELS: Record<string, string> = {
+  contact: 'Contact / Inquiry',
+  inquiry: 'Contact / Inquiry',
+  services: 'Service',
+  service: 'Service',
+  solutions: 'Solution',
+  solution: 'Solution',
+  seminar: 'Seminar / Event',
+  seminars: 'Seminar / Event',
+  events: 'Event',
+  event: 'Event',
+  webinar: 'Webinar',
+  careers: 'Careers',
+  career: 'Careers',
+  recruit: 'Careers / Recruiting',
+  company: 'Company Info',
+  corporate: 'Company Info',
+  about: 'About',
+  privacy: 'Privacy Policy',
+  terms: 'Terms of Service',
+  legal: 'Legal',
+  faq: 'FAQ',
+  help: 'Help / Support',
+  support: 'Help / Support',
+  ir: 'Investor Relations',
+  csr: 'CSR / Sustainability',
+  sustainability: 'Sustainability',
+  news: 'News',
+  press: 'Press Release',
+}
+
+const LOCALE_NAMES: Record<string, string> = {
+  en: 'English', ja: 'Japanese', zh: 'Chinese', ko: 'Korean',
+  fr: 'French', de: 'German', es: 'Spanish', pt: 'Portuguese',
+  it: 'Italian', ru: 'Russian', th: 'Thai', vi: 'Vietnamese',
+}
+
 function nameFor(template: string, cls: Classification, first: RawSample): string {
   if (cls === 'home') return 'Home'
   if (cls === 'product') return 'Product Detail'
@@ -642,10 +688,32 @@ function nameFor(template: string, cls: Classification, first: RawSample): strin
   if (cls === 'cart') return 'Cart'
   if (cls === 'search') return 'Search Results'
   if (cls === 'checkout') return 'Checkout / Order'
-  if (cls === 'content') return 'Article'
-  const segs = template.split('/').filter(Boolean).filter((s) => !s.startsWith(':'))
-  if (segs.length > 0) {
-    return segs[0].replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+  if (cls === 'content') {
+    const seg = template.split('/').filter(Boolean).filter((s) => !s.startsWith(':'))[0]?.toLowerCase()
+    if (seg === 'blog') return 'Blog Post'
+    if (seg === 'news') return 'News Article'
+    if (seg === 'press') return 'Press Release'
+    if (seg === 'stories' || seg === 'story') return 'Story'
+    return 'Article'
+  }
+  const segs = template.split('/').filter(Boolean)
+  const nonParams = segs.filter((s) => !s.startsWith(':'))
+  const firstSeg = nonParams[0]?.toLowerCase() ?? ''
+  const hasSlug = segs.some((s) => s.startsWith(':'))
+
+  // Locale landing pages: /en, /ja, /en-us, etc.
+  if (segs.length === 1 && /^[a-z]{2}(-[a-z]{2,4})?$/i.test(segs[0])) {
+    const code = segs[0].split('-')[0].toLowerCase()
+    const lang = LOCALE_NAMES[code]
+    if (lang) return lang + ' Top'
+  }
+
+  // Corporate label lookup
+  const label = CORPORATE_LABELS[firstSeg]
+  if (label) return hasSlug ? label + ' Detail' : label
+
+  if (nonParams.length > 0) {
+    return nonParams[0].replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
   }
   return first.title?.slice(0, 40) || 'Untitled'
 }
