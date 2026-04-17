@@ -82,7 +82,7 @@ export function AnalysisLoading() {
       <header className="border-b border-gray-800 bg-gray-900/50">
         <div className="max-w-screen-xl mx-auto px-6 h-16 flex items-center">
           <span className="font-semibold text-xl tracking-tight">Salesforce Personalization Workbench</span>
-          <span className="ml-2 text-[11px] font-semibold tracking-widest uppercase text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-violet-400 border border-blue-500/30 rounded px-2 py-0.5">by DentsuDigital</span>
+          <span className="ml-2 text-[11px] font-semibold tracking-widest uppercase text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-violet-400 border border-blue-500/30 rounded px-2 py-0.5">BY ARAI</span>
           <span className="ml-4 text-gray-600 text-xs">Analyzing {state.siteUrlInput}</span>
         </div>
       </header>
